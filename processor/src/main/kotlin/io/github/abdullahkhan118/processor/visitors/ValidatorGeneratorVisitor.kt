@@ -8,12 +8,20 @@ import com.google.devtools.ksp.symbol.KSAnnotation
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSPropertyDeclaration
 import com.google.devtools.ksp.symbol.KSVisitorVoid
+import io.github.abdullahkhan118.annotations.ByteDistinct
 import io.github.abdullahkhan118.annotations.ByteRange
+import io.github.abdullahkhan118.annotations.DoubleDistinct
 import io.github.abdullahkhan118.annotations.DoubleRange
+import io.github.abdullahkhan118.annotations.FloatDistinct
 import io.github.abdullahkhan118.annotations.FloatRange
+import io.github.abdullahkhan118.annotations.IntDistinct
 import io.github.abdullahkhan118.annotations.IntRange
+import io.github.abdullahkhan118.annotations.LongDistinct
 import io.github.abdullahkhan118.annotations.LongRange
+import io.github.abdullahkhan118.annotations.Regex
+import io.github.abdullahkhan118.annotations.ShortDistinct
 import io.github.abdullahkhan118.annotations.ShortRange
+import io.github.abdullahkhan118.annotations.StringDistinct
 import io.github.abdullahkhan118.processor.utils.appendToFile
 import io.github.abdullahkhan118.processor.utils.declareAsVariable
 import io.github.abdullahkhan118.processor.utils.getDeclaredName
@@ -76,8 +84,8 @@ class ValidatorGeneratorVisitor(
                    private fun $functionDeclaration = if(${property.declareAsVariable()} < $min || ${property.declareAsVariable()} > $max ) throw IllegalArgumentException("${property.getQualifiedName()} is out of range") else true
                 """.trimIndent()
 
-                    validatorFunctionCalls.append(functionCall)
-                    validatorFunctions.append(validatorFunction)
+                    validatorFunctionCalls.appendLine(functionCall)
+                    validatorFunctions.appendLine(validatorFunction)
                 }
 
             property.hasAnnotation(IntRange::class.java) -> property.getAnnotationsByType(
@@ -92,8 +100,8 @@ class ValidatorGeneratorVisitor(
                    private fun $functionDeclaration = if(${property.declareAsVariable()} < $min || ${property.declareAsVariable()} > $max ) throw IllegalArgumentException("${property.getQualifiedName()} is out of range") else true 
                 """.trimIndent()
 
-                    validatorFunctionCalls.append(functionCall)
-                    validatorFunctions.append(validatorFunction)
+                    validatorFunctionCalls.appendLine(functionCall)
+                    validatorFunctions.appendLine(validatorFunction)
 
                 }
 
@@ -108,8 +116,8 @@ class ValidatorGeneratorVisitor(
                    private fun $functionDeclaration = if(${property.declareAsVariable()} < $min || ${property.declareAsVariable()} > $max ) throw IllegalArgumentException("${property.getQualifiedName()} is out of range") else true 
                 """.trimIndent()
 
-                    validatorFunctionCalls.append(functionCall)
-                    validatorFunctions.append(validatorFunction)
+                    validatorFunctionCalls.appendLine(functionCall)
+                    validatorFunctions.appendLine(validatorFunction)
                 }
 
             property.hasAnnotation(LongRange::class.java) -> property.getAnnotationsByType(LongRange::class)
@@ -123,8 +131,8 @@ class ValidatorGeneratorVisitor(
                    private fun $functionDeclaration = if(${property.declareAsVariable()} < $min || ${property.declareAsVariable()} > $max ) throw IllegalArgumentException("${property.getQualifiedName()} is out of range") else true 
                 """.trimIndent()
 
-                    validatorFunctionCalls.append(functionCall)
-                    validatorFunctions.append(validatorFunction)
+                    validatorFunctionCalls.appendLine(functionCall)
+                    validatorFunctions.appendLine(validatorFunction)
                 }
 
             property.hasAnnotation(FloatRange::class.java) -> property.getAnnotationsByType(FloatRange::class)
@@ -141,8 +149,8 @@ class ValidatorGeneratorVisitor(
                    private fun $functionDeclaration = if(${property.declareAsVariable()} < $min || ${property.declareAsVariable()} > $max ) throw IllegalArgumentException("${property.getQualifiedName()} is out of range") else true 
                 """.trimIndent()
 
-                    validatorFunctionCalls.append(functionCall)
-                    validatorFunctions.append(validatorFunction)
+                    validatorFunctionCalls.appendLine(functionCall)
+                    validatorFunctions.appendLine(validatorFunction)
                 }
 
             property.hasAnnotation(DoubleRange::class.java) -> property.getAnnotationsByType(DoubleRange::class)
@@ -159,15 +167,124 @@ class ValidatorGeneratorVisitor(
                    private fun $functionDeclaration = if(${property.declareAsVariable()} < $min || ${property.declareAsVariable()} > $max ) throw IllegalArgumentException("${property.getQualifiedName()} is out of range") else true 
                 """.trimIndent()
 
-                    validatorFunctionCalls.append(functionCall)
-                    validatorFunctions.append(validatorFunction)
+                    validatorFunctionCalls.appendLine(functionCall)
+                    validatorFunctions.appendLine(validatorFunction)
+                }
+
+            property.hasAnnotation(ByteDistinct::class.java) -> property.getAnnotationsByType(ByteDistinct::class)
+                .firstOrNull()?.let {
+                    val values = it.values.joinToString(",")
+                    if (values.isEmpty()) throw IllegalStateException("${property.getQualifiedName()} does not have any valid values defined")
+
+                    val validatorFunction = """
+                   private fun $functionDeclaration = if(!listOf<${it.values.first()::class.qualifiedName}>($values).contains(${property.declareAsVariable()})) throw IllegalArgumentException("${property.getQualifiedName()} does not have a valid value") else true
+                """.trimIndent()
+
+                    validatorFunctionCalls.appendLine(functionCall)
+                    validatorFunctions.appendLine(validatorFunction)
+                }
+
+            property.hasAnnotation(ShortDistinct::class.java) -> property.getAnnotationsByType(ShortDistinct::class)
+                .firstOrNull()?.let {
+                    val values = it.values.joinToString(",")
+                    if (values.isEmpty()) throw IllegalStateException("${property.getQualifiedName()} does not have any valid values defined")
+
+                    val validatorFunction = """
+                   private fun $functionDeclaration = if(!listOf<${it.values.first()::class.qualifiedName}>($values).contains(${property.declareAsVariable()})) throw IllegalArgumentException("${property.getQualifiedName()} does not have a valid value") else true
+                """.trimIndent()
+
+                    validatorFunctionCalls.appendLine(functionCall)
+                    validatorFunctions.appendLine(validatorFunction)
+                }
+
+            property.hasAnnotation(IntDistinct::class.java) -> property.getAnnotationsByType(IntDistinct::class)
+                .firstOrNull()?.let {
+                    val values = it.values.joinToString(",")
+                    if (values.isEmpty()) throw IllegalStateException("${property.getQualifiedName()} does not have any valid values defined")
+
+                    val validatorFunction = """
+                   private fun $functionDeclaration = if(!listOf<${it.values.first()::class.qualifiedName}>($values).contains(${property.declareAsVariable()})) throw IllegalArgumentException("${property.getQualifiedName()} does not have a valid value") else true
+                """.trimIndent()
+
+                    validatorFunctionCalls.appendLine(functionCall)
+                    validatorFunctions.appendLine(validatorFunction)
+                }
+
+            property.hasAnnotation(LongDistinct::class.java) -> property.getAnnotationsByType(LongDistinct::class)
+                .firstOrNull()?.let {
+                    val values = it.values.joinToString(",")
+                    if (values.isEmpty()) throw IllegalStateException("${property.getQualifiedName()} does not have any valid values defined")
+
+                    val validatorFunction = """
+                   private fun $functionDeclaration = if(!listOf<${it.values.first()::class.qualifiedName}>($values).contains(${property.declareAsVariable()})) throw IllegalArgumentException("${property.getQualifiedName()} does not have a valid value") else true
+                """.trimIndent()
+
+                    validatorFunctionCalls.appendLine(functionCall)
+                    validatorFunctions.appendLine(validatorFunction)
+                }
+
+            property.hasAnnotation(FloatDistinct::class.java) -> property.getAnnotationsByType(FloatDistinct::class)
+                .firstOrNull()?.let {
+                    val values = it.values.joinToString(",")
+                    if (values.isEmpty()) throw IllegalStateException("${property.getQualifiedName()} does not have any valid values defined")
+
+                    val validatorFunction = """
+                   private fun $functionDeclaration = if(!listOf<${it.values.first()::class.qualifiedName}>($values).contains(${property.declareAsVariable()})) throw IllegalArgumentException("${property.getQualifiedName()} does not have a valid value") else true
+                """.trimIndent()
+
+                    validatorFunctionCalls.appendLine(functionCall)
+                    validatorFunctions.appendLine(validatorFunction)
+                }
+
+            property.hasAnnotation(DoubleDistinct::class.java) -> property.getAnnotationsByType(DoubleDistinct::class)
+                .firstOrNull()?.let {
+                    val values = it.values.joinToString(",")
+                    if (values.isEmpty()) throw IllegalStateException("${property.getQualifiedName()} does not have any valid values defined")
+
+                    val validatorFunction = """
+                   private fun $functionDeclaration = if(!listOf<${it.values.first()::class.qualifiedName}>($values).contains(${property.declareAsVariable()})) throw IllegalArgumentException("${property.getQualifiedName()} does not have a valid value") else true
+                """.trimIndent()
+
+                    validatorFunctionCalls.appendLine(functionCall)
+                    validatorFunctions.appendLine(validatorFunction)
+                }
+
+            property.hasAnnotation(StringDistinct::class.java) -> property.getAnnotationsByType(StringDistinct::class)
+                .firstOrNull()?.let {
+                    val values = it.values.joinToString { "\"$it\"" }
+                    if (values.isEmpty()) throw IllegalStateException("${property.getQualifiedName()} does not have any valid values defined")
+
+                    val validatorFunction = """
+                   private fun $functionDeclaration = if(!listOf<${it.values.first()::class.qualifiedName}>($values).contains(${property.declareAsVariable()})) throw IllegalArgumentException("${property.getQualifiedName()} does not have a valid value") else true
+                """.trimIndent()
+
+                    validatorFunctionCalls.appendLine(functionCall)
+                    validatorFunctions.appendLine(validatorFunction)
+                }
+
+
+
+            property.hasAnnotation(Regex::class.java) -> property.getAnnotationsByType(Regex::class)
+                .firstOrNull()?.let {
+                    if (it.pattern.isEmpty()) throw IllegalStateException("${property.getQualifiedName()} has no valid pattern")
+
+                    val regex = it.pattern
+
+                    val functionDeclaration =
+                        "${property.getDeclaredName()}IsValid(${property.getDeclaredName()}: ${property.getTypeQualifiedName()})"
+
+                    val validatorFunction = """
+                   private fun $functionDeclaration = if(!Regex("$regex").matches(${property.declareAsVariable()})) throw IllegalArgumentException("${property.getQualifiedName()} does not match the pattern ${it.pattern}") else true 
+                """.trimIndent()
+
+                    validatorFunctionCalls.appendLine(functionCall)
+                    validatorFunctions.appendLine(validatorFunction)
                 }
 
             else -> ""
         }
     }
 
-    @OptIn(KspExperimental::class)
     override fun visitClassDeclaration(declaration: KSClassDeclaration, data: Unit) {
         super.visitClassDeclaration(declaration, data)
         
