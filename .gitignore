@@ -1,0 +1,91 @@
+### Gradle ###
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+!**/src/main/**/build/
+!**/src/test/**/build/
+gradle-app.setting
+.gradletasknamecache
+
+# Machine-specific paths and credentials; never commit
+local.properties
+
+### Kotlin / KSP ###
+.kotlin/
+kotlin-js-store/
+
+### IntelliJ IDEA ###
+# Shared project config (.idea/gradle.xml, misc.xml, vcs.xml, kotlinc.xml) is
+# intentionally tracked; everything below is per-developer or regenerated state.
+.idea/workspace.xml
+.idea/tasks.xml
+.idea/usage.statistics.xml
+.idea/dictionaries/
+.idea/shelf/
+.idea/caches/
+.idea/httpRequests/
+.idea/modules.xml
+.idea/jarRepositories.xml
+.idea/compiler.xml
+.idea/libraries/
+.idea/dataSources/
+.idea/dataSources.local.xml
+.idea/sqlDataSources.xml
+.idea/dynamic.xml
+.idea/uiDesigner.xml
+.idea/assetWizardSettings.xml
+.idea/deploymentTargetDropDown.xml
+.idea/replstate.xml
+.idea/sonarlint/
+*.iws
+*.iml
+*.ipr
+out/
+!**/src/main/**/out/
+!**/src/test/**/out/
+
+### Eclipse ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+bin/
+!**/src/main/**/bin/
+!**/src/test/**/bin/
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+### VS Code ###
+.vscode/
+
+### JVM crash / profiling output ###
+hs_err_pid*
+replay_pid*
+*.hprof
+
+### Logs ###
+*.log
+
+### Mac OS ###
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+### Windows ###
+Thumbs.db
+Desktop.ini
+
+### Editor backups ###
+*~
+*.swp
+*.swo
