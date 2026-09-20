@@ -9,7 +9,7 @@ import io.github.abdullahkhan118.annotations.Validate
 @Validate
 class User(
     @ByteRange(10, 20)
-    val age: Byte,
+    internal val age: Byte,
     @Regex("^[A-Za-z][A-Za-z '-]*$")
     val name: String,
     @ByteDistinct(1,2,3,4,5)

@@ -2,6 +2,10 @@ package io.github.abdullahkhan118.processor.visitors
 
 import com.google.devtools.ksp.KspExperimental
 import com.google.devtools.ksp.getAnnotationsByType
+import com.google.devtools.ksp.isInternal
+import com.google.devtools.ksp.isPrivate
+import com.google.devtools.ksp.isProtected
+import com.google.devtools.ksp.isPublic
 import com.google.devtools.ksp.processing.CodeGenerator
 import com.google.devtools.ksp.symbol.KSAnnotated
 import com.google.devtools.ksp.symbol.KSAnnotation
@@ -76,9 +80,12 @@ class ValidatorGeneratorVisitor(
             
             property.hasAnnotation(ByteRange::class.java) -> property.getAnnotationsByType(ByteRange::class)
                 .firstOrNull()?.let {
+
+                    if(!property.isPublic() && !property.isInternal()) throw IllegalStateException("${ByteRange::class.qualifiedName} can only be applied to public visibility")
+
                     val min = it.min
                     val max = it.max
-                    if (min > max) throw IllegalStateException("${property.getQualifiedName()} has min value greater than the max value")
+                    if (min > max) throw IllegalArgumentException("${property.getQualifiedName()} has min value greater than the max value")
 
                     val validatorFunction = """
                    private fun $functionDeclaration = if(${property.declareAsVariable()} < $min || ${property.declareAsVariable()} > $max ) throw IllegalArgumentException("${property.getQualifiedName()} is out of range") else true
@@ -92,9 +99,12 @@ class ValidatorGeneratorVisitor(
                 IntRange::class
             )
                 .firstOrNull()?.let {
+
+                    if(!property.isPublic() && !property.isInternal()) throw IllegalStateException("${IntRange::class.qualifiedName} can only be applied to public visibility")
+
                     val min = it.min
                     val max = it.max
-                    if (min > max) throw IllegalStateException("${property.getQualifiedName()} has min value greater than the max value")
+                    if (min > max) throw IllegalArgumentException("${property.getQualifiedName()} has min value greater than the max value")
                     
                     val validatorFunction = """
                    private fun $functionDeclaration = if(${property.declareAsVariable()} < $min || ${property.declareAsVariable()} > $max ) throw IllegalArgumentException("${property.getQualifiedName()} is out of range") else true 
@@ -107,9 +117,12 @@ class ValidatorGeneratorVisitor(
 
             property.hasAnnotation(ShortRange::class.java) -> property.getAnnotationsByType(ShortRange::class)
                 .firstOrNull()?.let {
+
+                    if(!property.isPublic() && !property.isInternal()) throw IllegalStateException("${ShortRange::class.qualifiedName} can only be applied to public visibility")
+
                     val min = it.min
                     val max = it.max
-                    if (min > max) throw IllegalStateException("${property.getQualifiedName()} has min value greater than the max value")
+                    if (min > max) throw IllegalArgumentException("${property.getQualifiedName()} has min value greater than the max value")
                     
 
                     val validatorFunction = """
@@ -122,9 +135,12 @@ class ValidatorGeneratorVisitor(
 
             property.hasAnnotation(LongRange::class.java) -> property.getAnnotationsByType(LongRange::class)
                 .firstOrNull()?.let {
+
+                    if(!property.isPublic() && !property.isInternal()) throw IllegalStateException("${LongRange::class.qualifiedName} can only be applied to public visibility")
+
                     val min = it.min
                     val max = it.max
-                    if (min > max) throw IllegalStateException("${property.getQualifiedName()} has min value greater than the max value")
+                    if (min > max) throw IllegalArgumentException("${property.getQualifiedName()} has min value greater than the max value")
                     
 
                     val validatorFunction = """
@@ -137,9 +153,12 @@ class ValidatorGeneratorVisitor(
 
             property.hasAnnotation(FloatRange::class.java) -> property.getAnnotationsByType(FloatRange::class)
                 .firstOrNull()?.let {
+
+                    if(!property.isPublic() && !property.isInternal()) throw IllegalStateException("${FloatRange::class.qualifiedName} can only be applied to public visibility")
+
                     val min = it.min
                     val max = it.max
-                    if (min > max) throw IllegalStateException("${property.getQualifiedName()} has min value greater than the max value")
+                    if (min > max) throw IllegalArgumentException("${property.getQualifiedName()} has min value greater than the max value")
 
 
                     val functionDeclaration =
@@ -155,9 +174,12 @@ class ValidatorGeneratorVisitor(
 
             property.hasAnnotation(DoubleRange::class.java) -> property.getAnnotationsByType(DoubleRange::class)
                 .firstOrNull()?.let {
+
+                    if(!property.isPublic() && !property.isInternal()) throw IllegalStateException("${DoubleRange::class.qualifiedName} can only be applied to public visibility")
+
                     val min = it.min
                     val max = it.max
-                    if (min > max) throw IllegalStateException("${property.getQualifiedName()} has min value greater than the max value")
+                    if (min > max) throw IllegalArgumentException("${property.getQualifiedName()} has min value greater than the max value")
 
 
                     val functionDeclaration =
@@ -173,8 +195,11 @@ class ValidatorGeneratorVisitor(
 
             property.hasAnnotation(ByteDistinct::class.java) -> property.getAnnotationsByType(ByteDistinct::class)
                 .firstOrNull()?.let {
+
+                    if(!property.isPublic() && !property.isInternal()) throw IllegalStateException("${ByteDistinct::class.qualifiedName} can only be applied to public visibility")
+
                     val values = it.values.joinToString(",")
-                    if (values.isEmpty()) throw IllegalStateException("${property.getQualifiedName()} does not have any valid values defined")
+                    if (values.isEmpty()) throw IllegalArgumentException("${property.getQualifiedName()} does not have any valid values defined")
 
                     val validatorFunction = """
                    private fun $functionDeclaration = if(!listOf<${it.values.first()::class.qualifiedName}>($values).contains(${property.declareAsVariable()})) throw IllegalArgumentException("${property.getQualifiedName()} does not have a valid value") else true
@@ -186,8 +211,11 @@ class ValidatorGeneratorVisitor(
 
             property.hasAnnotation(ShortDistinct::class.java) -> property.getAnnotationsByType(ShortDistinct::class)
                 .firstOrNull()?.let {
+
+                    if(!property.isPublic() && !property.isInternal()) throw IllegalStateException("${ShortDistinct::class.qualifiedName} can only be applied to public visibility")
+
                     val values = it.values.joinToString(",")
-                    if (values.isEmpty()) throw IllegalStateException("${property.getQualifiedName()} does not have any valid values defined")
+                    if (values.isEmpty()) throw IllegalArgumentException("${property.getQualifiedName()} does not have any valid values defined")
 
                     val validatorFunction = """
                    private fun $functionDeclaration = if(!listOf<${it.values.first()::class.qualifiedName}>($values).contains(${property.declareAsVariable()})) throw IllegalArgumentException("${property.getQualifiedName()} does not have a valid value") else true
@@ -199,8 +227,11 @@ class ValidatorGeneratorVisitor(
 
             property.hasAnnotation(IntDistinct::class.java) -> property.getAnnotationsByType(IntDistinct::class)
                 .firstOrNull()?.let {
+
+                    if(!property.isPublic() && !property.isInternal()) throw IllegalStateException("${IntDistinct::class.qualifiedName} can only be applied to public visibility")
+
                     val values = it.values.joinToString(",")
-                    if (values.isEmpty()) throw IllegalStateException("${property.getQualifiedName()} does not have any valid values defined")
+                    if (values.isEmpty()) throw IllegalArgumentException("${property.getQualifiedName()} does not have any valid values defined")
 
                     val validatorFunction = """
                    private fun $functionDeclaration = if(!listOf<${it.values.first()::class.qualifiedName}>($values).contains(${property.declareAsVariable()})) throw IllegalArgumentException("${property.getQualifiedName()} does not have a valid value") else true
@@ -212,8 +243,11 @@ class ValidatorGeneratorVisitor(
 
             property.hasAnnotation(LongDistinct::class.java) -> property.getAnnotationsByType(LongDistinct::class)
                 .firstOrNull()?.let {
+
+                    if(!property.isPublic() && !property.isInternal()) throw IllegalStateException("${LongDistinct::class.qualifiedName} can only be applied to public visibility")
+
                     val values = it.values.joinToString(",")
-                    if (values.isEmpty()) throw IllegalStateException("${property.getQualifiedName()} does not have any valid values defined")
+                    if (values.isEmpty()) throw IllegalArgumentException("${property.getQualifiedName()} does not have any valid values defined")
 
                     val validatorFunction = """
                    private fun $functionDeclaration = if(!listOf<${it.values.first()::class.qualifiedName}>($values).contains(${property.declareAsVariable()})) throw IllegalArgumentException("${property.getQualifiedName()} does not have a valid value") else true
@@ -225,8 +259,11 @@ class ValidatorGeneratorVisitor(
 
             property.hasAnnotation(FloatDistinct::class.java) -> property.getAnnotationsByType(FloatDistinct::class)
                 .firstOrNull()?.let {
+
+                    if(!property.isPublic() && !property.isInternal()) throw IllegalStateException("${FloatDistinct::class.qualifiedName} can only be applied to public visibility")
+
                     val values = it.values.joinToString(",")
-                    if (values.isEmpty()) throw IllegalStateException("${property.getQualifiedName()} does not have any valid values defined")
+                    if (values.isEmpty()) throw IllegalArgumentException("${property.getQualifiedName()} does not have any valid values defined")
 
                     val validatorFunction = """
                    private fun $functionDeclaration = if(!listOf<${it.values.first()::class.qualifiedName}>($values).contains(${property.declareAsVariable()})) throw IllegalArgumentException("${property.getQualifiedName()} does not have a valid value") else true
@@ -238,8 +275,11 @@ class ValidatorGeneratorVisitor(
 
             property.hasAnnotation(DoubleDistinct::class.java) -> property.getAnnotationsByType(DoubleDistinct::class)
                 .firstOrNull()?.let {
+
+                    if(!property.isPublic() && !property.isInternal()) throw IllegalStateException("${DoubleDistinct::class.qualifiedName} can only be applied to public visibility")
+
                     val values = it.values.joinToString(",")
-                    if (values.isEmpty()) throw IllegalStateException("${property.getQualifiedName()} does not have any valid values defined")
+                    if (values.isEmpty()) throw IllegalArgumentException("${property.getQualifiedName()} does not have any valid values defined")
 
                     val validatorFunction = """
                    private fun $functionDeclaration = if(!listOf<${it.values.first()::class.qualifiedName}>($values).contains(${property.declareAsVariable()})) throw IllegalArgumentException("${property.getQualifiedName()} does not have a valid value") else true
@@ -251,8 +291,11 @@ class ValidatorGeneratorVisitor(
 
             property.hasAnnotation(StringDistinct::class.java) -> property.getAnnotationsByType(StringDistinct::class)
                 .firstOrNull()?.let {
+
+                    if(!property.isPublic() && !property.isInternal()) throw IllegalStateException("${StringDistinct::class.qualifiedName} can only be applied to public visibility")
+
                     val values = it.values.joinToString { "\"$it\"" }
-                    if (values.isEmpty()) throw IllegalStateException("${property.getQualifiedName()} does not have any valid values defined")
+                    if (values.isEmpty()) throw IllegalArgumentException("${property.getQualifiedName()} does not have any valid values defined")
 
                     val validatorFunction = """
                    private fun $functionDeclaration = if(!listOf<${it.values.first()::class.qualifiedName}>($values).contains(${property.declareAsVariable()})) throw IllegalArgumentException("${property.getQualifiedName()} does not have a valid value") else true
@@ -266,7 +309,10 @@ class ValidatorGeneratorVisitor(
 
             property.hasAnnotation(Regex::class.java) -> property.getAnnotationsByType(Regex::class)
                 .firstOrNull()?.let {
-                    if (it.pattern.isEmpty()) throw IllegalStateException("${property.getQualifiedName()} has no valid pattern")
+
+                    if(!property.isPublic() && !property.isInternal()) throw IllegalStateException("${Regex::class.qualifiedName} can only be applied to public visibility")
+
+                    if (it.pattern.isEmpty()) throw IllegalArgumentException("${property.getQualifiedName()} has no valid pattern")
 
                     val regex = it.pattern
 
