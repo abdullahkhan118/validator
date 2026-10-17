@@ -21,7 +21,18 @@ class LifecycleTest {
             @IntRange(0, 9) val derived: Int
             init { derived = balance * 2 }
             constructor(text: String) : this(0) { balance = text.length }
-            fun changeFlag(value: Int) { flag = value }
+            // Named like the JVM setter of `flag`: private default accessors aren't generated, so it mustn't clash.
+            fun setFlag(value: Int) { flag = value }
+            fun flagFromLambda(value: Int) = run { flag = value }
+            inner class Inner { fun setOuterFlag(value: Int) { flag = value } }
+        }
+
+        @Validated
+        class Counter {
+            @IntRange(0, 9) var count: Int = 0
+                private set
+            fun setCount(value: Int) { count = value }
+            fun increment() { count += 1 }
         }
 
         @Validated data class Point(@IntRange(0, 9) val x: Int)
@@ -42,7 +53,14 @@ class LifecycleTest {
         fun secondaryConstructor() { Account("a long text") }
         fun setter() { account.balance = 42 }
         fun balanceAfterRejection() = account.balance
-        fun privateSetter() { account.changeFlag(2) }
+        fun privateSetter() { account.setFlag(2) }
+        fun privateSetterFromLambda() { account.flagFromLambda(2) }
+        fun privateSetterFromInnerClass() { account.Inner().setOuterFlag(2) }
+        fun privateSetterValid() { account.setFlag(1); account.flagFromLambda(0) }
+        val counter = Counter()
+        fun privateSetOnPublicVar() { counter.setCount(10) }
+        fun compoundAssignment() { counter.setCount(9); counter.increment() }
+        fun countAfterRejection() = counter.count
         fun lateinitUnsetPasses() = Account(1).toString()
         fun lateinitSetter() { account.nick = "Nope" }
         fun dataCopy() { Point(1).copy(x = 10) }
@@ -71,8 +89,18 @@ class LifecycleTest {
     fun `setters reject invalid values and keep the old one`() {
         compiled.assertRejects("setter", "Account.balance must be between 0 and 9 but was 42")
         assertEquals(4, compiled.call("balanceAfterRejection"))
-        compiled.assertRejects("privateSetter", "Account.flag must be between 0 and 1 but was 2")
         compiled.assertRejects("lateinitSetter", "Account.nick must match the pattern [a-z]+ but was \"Nope\"")
+    }
+
+    @Test
+    fun `private setters are checked wherever they're called from, without clashing with a setX() function`() {
+        compiled.call("privateSetterValid")
+        compiled.assertRejects("privateSetter", "Account.flag must be between 0 and 1 but was 2")
+        compiled.assertRejects("privateSetterFromLambda", "Account.flag must be between 0 and 1 but was 2")
+        compiled.assertRejects("privateSetterFromInnerClass", "Account.flag must be between 0 and 1 but was 2")
+        compiled.assertRejects("privateSetOnPublicVar", "Counter.count must be between 0 and 9 but was 10")
+        compiled.assertRejects("compoundAssignment", "Counter.count must be between 0 and 9 but was 10")
+        assertEquals(9, compiled.call("countAfterRejection"))
     }
 
     @Test

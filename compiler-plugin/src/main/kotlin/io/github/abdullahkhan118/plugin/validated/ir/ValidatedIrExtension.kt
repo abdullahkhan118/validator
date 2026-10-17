@@ -4,6 +4,7 @@ import io.github.abdullahkhan118.plugin.util.ir.addCallAtStart
 import io.github.abdullahkhan118.plugin.validated.ValidatedKey
 import io.github.abdullahkhan118.plugin.validated.ValidatedNames
 import io.github.abdullahkhan118.plugin.validated.ValueType
+import org.jetbrains.kotlin.backend.common.IrElementTransformerVoidWithContext
 import org.jetbrains.kotlin.backend.common.extensions.IrGenerationExtension
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
 import org.jetbrains.kotlin.backend.common.lower.DeclarationIrBuilder
@@ -50,6 +51,7 @@ import org.jetbrains.kotlin.ir.declarations.IrParameterKind
 import org.jetbrains.kotlin.ir.declarations.IrSimpleFunction
 import org.jetbrains.kotlin.ir.declarations.IrValueParameter
 import org.jetbrains.kotlin.ir.expressions.IrBlockBody
+import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.expressions.IrExpression
 import org.jetbrains.kotlin.ir.expressions.IrStatementOrigin
 import org.jetbrains.kotlin.ir.expressions.impl.IrConstImpl
@@ -531,17 +533,53 @@ private class ValidatedClassTransformer(
     // ---------------------------------------------------------------------------------------------
 
     private fun validateAtStartOfSetters(validators: Map<ValidatedProperty, IrSimpleFunction>) {
+        val checkedAtCallSites = mutableMapOf<IrSimpleFunctionSymbol, IrSimpleFunction>()
         validators.forEach { (validated, validator) ->
             val setter = validated.property.setter ?: return@forEach
+            // The JVM backend doesn't generate a PRIVATE DEFAULT setter at all: it replaces calls to it with a
+            // direct field write (`flag = 5` inside the class becomes `this.flag = 5`), skipping the setter's body.
+            // So check before each of those calls instead. (Forcing a real setter would also work, but a JVM
+            // `setFlag(I)V` would then clash with a function of the class named `setFlag(Int)`.)
+            if (setter.origin == IrDeclarationOrigin.DEFAULT_PROPERTY_ACCESSOR && DescriptorVisibilities.isPrivate(setter.visibility)) {
+                checkedAtCallSites[setter.symbol] = validator
+                return@forEach
+            }
             val self = setter.dispatchReceiverParameter ?: return@forEach
             val newValue = setter.parameters.firstOrNull { it.kind == IrParameterKind.Regular } ?: return@forEach
             val builder = DeclarationIrBuilder(pluginContext, setter.symbol)
             setter.addCallAtStart(pluginContext, validator.symbol, builder.irGet(self), builder.irGet(newValue))
-            // The JVM backend replaces calls to a PRIVATE property's DEFAULT setter with a direct field write
-            // (`rank = 5` inside the class becomes `this.rank = 5`), skipping the setter and our check. It
-            // decides by this origin, not by the body, so mark the setter as a normal, user-defined one.
-            if (setter.origin == IrDeclarationOrigin.DEFAULT_PROPERTY_ACCESSOR) setter.origin = IrDeclarationOrigin.DEFINED
         }
+        if (checkedAtCallSites.isNotEmpty()) validateBeforeSetterCalls(checkedAtCallSites)
+    }
+
+    /**
+     * Rewrites every call to one of [validators]' setters in the class (including its lambdas and inner classes,
+     * the only other places a private setter can be called from):
+     *
+     *     receiver.flag = value   ->   { val r = receiver; val v = value; r.validateFlag(v); r.flag = v }
+     *
+     * The receiver and value are evaluated once, in their original order, before the check.
+     */
+    private fun validateBeforeSetterCalls(validators: Map<IrSimpleFunctionSymbol, IrSimpleFunction>) {
+        irClass.transformChildrenVoid(object : IrElementTransformerVoidWithContext() {
+            override fun visitCall(expression: IrCall): IrExpression {
+                expression.transformChildrenVoid(this)
+                val validator = validators[expression.symbol] ?: return expression
+                val owner = currentScope?.scope?.scopeOwnerSymbol ?: return expression
+                val builder = DeclarationIrBuilder(pluginContext, owner, expression.startOffset, expression.endOffset)
+                return builder.irBlock(resultType = expression.type) {
+                    val receiver = irTemporary(expression.arguments[0], nameHint = "receiver")
+                    val value = irTemporary(expression.arguments[1], nameHint = "value")
+                    +irCall(validator.symbol).apply {
+                        arguments[0] = irGet(receiver)
+                        arguments[1] = irGet(value)
+                    }
+                    expression.arguments[0] = irGet(receiver)
+                    expression.arguments[1] = irGet(value)
+                    +expression
+                }
+            }
+        })
     }
 
     // ---------------------------------------------------------------------------------------------
