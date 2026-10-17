@@ -184,6 +184,18 @@ Multi-module Gradle project, versions pinned in `gradle/libs.versions.toml`:
 ./gradlew :app:run
 ```
 
+## Tests
+
+```bash
+./gradlew :compiler-plugin:test
+```
+
+The tests (`compiler-plugin/src/test`) compile small Kotlin sources in-process
+with the plugin jar loaded via `-Xplugin`, as a real build does
+(`TestCompiler.kt`). They check the compile errors and warnings, and run the
+compiled code to check what is accepted and rejected (`ConstraintsTest`,
+`CollectionsTest`, `LifecycleTest`, `DiagnosticsTest`).
+
 ## Requirements
 
 - JDK 17 (configured via `jvmToolchain(17)` in each module).
