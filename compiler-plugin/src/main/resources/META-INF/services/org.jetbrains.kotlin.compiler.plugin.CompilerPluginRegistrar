@@ -1,0 +1,2 @@
+# ServiceLoader registration: the compiler reads this file to find the plugin by class name.
+io.github.abdullahkhan118.plugin.ValidatorCompilerPluginRegistrar

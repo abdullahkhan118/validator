@@ -1,77 +1,131 @@
 # validator
 
-A Kotlin Symbol Processing (KSP) based compile-time validator generator.
+A Kotlin compiler plugin that builds validation into your classes, driven by
+constraint annotations (`@ByteRange`, `@Regex`, `@IntDistinct`, ...).
 
-Annotate a class's constructor properties with constraint annotations
-(`@ByteRange`, `@Regex`, `@IntDistinct`, ...) and the processor generates a
-companion `*Validator` class that checks every annotated property and throws
-an `IllegalArgumentException` on the first constraint that fails.
+Unlike a separate validator you have to remember to call, the checks run
+automatically: in every constructor, and in the setter of every annotated
+`var`. Misused annotations (wrong type, `min > max`, an invalid regex) are
+compile errors that point at the source line.
 
-## How it works
+## Compiler plugin: `@Validated`
 
-1. Annotate a class with `@Validate`.
-2. Annotate its constructor properties with one or more constraint
-   annotations from the `annotations` module.
-3. KSP (via the `processor` module) generates a `<ClassName>Validator` class
-   next to it, wrapping an instance of the annotated class and exposing a
-   single `validate()` function.
-4. Call `validate()` after constructing the object to enforce the
-   constraints.
-
-### Example
+Annotate a class with `@Validated` and its properties with constraints. The
+plugin builds the checks into the class, so **an invalid object can't be
+created, and an existing one can't be made invalid**: a failed check throws
+`IllegalArgumentException`, and a rejected assignment leaves the old value in
+place.
 
 ```kotlin
 // app/src/main/kotlin/User.kt
-@Validate
+@Validated
 class User(
-    @ByteRange(10, 20)
-    val age: Byte,
     @Regex("^[A-Za-z][A-Za-z '-]*$")
     val name: String,
     @ByteDistinct(1, 2, 3, 4, 5)
     val level: Byte,
     @StringDistinct("intern", "junior", "mid", "senior")
     val type: String
-)
-```
-
-```kotlin
-// app/src/main/kotlin/Main.kt
-fun main() {
-    UserValidator(User(age = 15, name = "abdullah", level = 2, type = "mid")).validate()
+) {
+    @ByteRange(10, 20)
+    internal var age: Byte = 18
 }
 ```
 
-Generated output (`build/generated/ksp/main/kotlin/.../UserGenerated.kt`):
+```kotlin
+val user = User("abdullah", 2, "mid")   // OK
+user.age = 15                           // OK
+user.validate()                         // generated: re-checks every property on demand
+
+User("abdullah", 9, "mid")  // IllegalArgumentException: User.level must be one of [1, 2, 3, 4, 5] but was 9
+user.age = 25               // IllegalArgumentException: User.age must be between 10 and 20 but was 25
+                            // (user.age is still 15)
+```
+
+### What the plugin generates
+
+The class behaves as if it had been written like this:
 
 ```kotlin
-class UserValidator(
-    private val user: io.github.abdullahkhan118.User
-) {
-    fun validate() {
-        ageIsValid(user.age)
-        nameIsValid(user.name)
-        levelIsValid(user.level)
-        typeIsValid(user.type)
+class User(name: String, level: Byte, type: String) {
+    internal var age: Byte = 18
+        set(value) { validateAge(value); field = value }    // setters check first
+
+    fun validate() = validateDeclaredProperties()           // public, for on-demand checks
+
+    private fun validateDeclaredProperties() {               // this class's own properties
+        validateName(name); validateLevel(level); validateType(type); validateAge(age)
     }
 
-    private fun ageIsValid(age: kotlin.Byte) =
-        if (age < 10 || age > 20) throw IllegalArgumentException("...age is out of range") else true
-
-    private fun nameIsValid(name: kotlin.String) =
-        if (!Regex("^[A-Za-z][A-Za-z '-]*$").matches(name)) throw IllegalArgumentException("...name does not match the pattern ...") else true
-
+    private fun validateAge(value: Byte) {                   // one check per property
+        if (value < 10 || value > 20) throw IllegalArgumentException("User.age must be between 10 and 20 but was $value")
+    }
     // ...
+}
+// ...and every constructor ends with validateDeclaredProperties().
+```
+
+It works with:
+
+- constructor `val`/`var`s and properties declared in the class body,
+- nullable properties (`null` always passes; use a non-null type to forbid it),
+- `lateinit var` (checked once it's assigned),
+- `private var` (checked when changed from inside the class),
+- secondary constructors, data class `copy()`, and `object`s,
+- inheritance: each class validates its own properties during construction,
+  and `validate()` on a subclass checks the whole hierarchy.
+
+### Compile-time errors
+
+Misused annotations fail the build, pointing at the annotation:
+
+```
+e: Bad.kt:8:11 [validated] @ByteRange can only be used on a kotlin.Byte property, but Bad.wrongType is kotlin.Int
+e: Bad.kt:8:48 [validated] @IntRange on Bad.minAboveMax has min (10) greater than max (1)
+e: Bad.kt:8:99 [validated] @IntDistinct on Bad.noValues lists no allowed values
+e: Bad.kt:8:133 [validated] @Regex on Bad.brokenPattern has an invalid pattern: Unclosed character class near index 3
+```
+
+Also an error: `@Validated` on an interface, annotation class or value class,
+and a `@Validated` class that declares its own `validate()`. Constraints in a
+class without `@Validated` are a warning (they'd have no effect).
+
+### Using it
+
+The plugin is loaded straight from its jar (see `app/build.gradle.kts`):
+
+```kotlin
+evaluationDependsOn(":compiler-plugin")
+val validatorPluginJar = project(":compiler-plugin").tasks.named<Jar>("jar")
+
+kotlin {
+    compilerOptions {
+        freeCompilerArgs.addAll(
+            validatorPluginJar.flatMap { it.archiveFile }.map { listOf("-Xplugin=${it.asFile.absolutePath}") },
+        )
+    }
+}
+
+tasks.named("compileKotlin") {
+    dependsOn(validatorPluginJar)
+    inputs.files(validatorPluginJar).withPropertyName("validatorPluginJar")
 }
 ```
 
-`validate()` throws on the first failing property; if it returns normally,
-every annotated property satisfied its constraint.
+### How it's built
+
+| Package (`compiler-plugin`) | Role |
+| --- | --- |
+| `plugin` | `ValidatorCompilerPluginRegistrar`, the entry point (found via `META-INF/services`) |
+| `plugin.validated` | names, and the table of constraint annotations |
+| `plugin.validated.fir` | FIR: declares the public `validate()` so user code can call it |
+| `plugin.validated.ir` | IR: reads the annotations, reports misuse, builds the checks, wires them into constructors and setters |
+| `plugin.util.fir` / `plugin.util.ir` | reusable helpers (`BaseFirDeclarationGenerationExtension`, `addCallAtStart`, ...) |
 
 ## Supported annotations
 
-All defined in the `annotations` module
-(`io.github.abdullahkhan118.annotations`):
+All in the `annotations` module (`io.github.abdullahkhan118.annotations`).
+They can only be placed on properties (including `val`/`var` constructor parameters).
 
 | Annotation | Applies to | Checks |
 | --- | --- | --- |
@@ -88,54 +142,55 @@ All defined in the `annotations` module
 | `@FloatDistinct(vararg values)` | `Float` | value is one of `values` |
 | `@DoubleDistinct(vararg values)` | `Double` | value is one of `values` |
 | `@StringDistinct(vararg values)` | `String` | value is one of `values` |
-| `@Regex(pattern)` | `String` | value matches `pattern` |
+| `@Regex(pattern)` | `String` | the whole value matches `pattern` |
 
-A class must be annotated with `@Validate` for the processor to generate a
-validator for it.
+For ranges, leaving `min` or `max` out means no limit on that side.
+
+`IntRange`, `LongRange` and `Regex` share their names with Kotlin's own
+`kotlin.ranges.IntRange`, `kotlin.ranges.LongRange` and `kotlin.text.Regex`,
+which are imported by default. Import them explicitly
+(`import io.github.abdullahkhan118.annotations.IntRange`); a star import
+loses to Kotlin's default imports.
 
 ## Project layout
 
-This is a multi-module Gradle project, versions pinned via the version
-catalog at `gradle/libs.versions.toml`:
+Multi-module Gradle project, versions pinned in `gradle/libs.versions.toml`:
 
 | Module | Purpose |
 | --- | --- |
-| `annotations` | The constraint annotations (`@Validate`, `@ByteRange`, `@Regex`, ...). No KSP dependency — this is what consumer code depends on at compile time. |
-| `processor` | The KSP `SymbolProcessorProvider`/`SymbolProcessor` that walks `@Validate`-annotated classes and generates the `*Validator` classes. |
-| `app` | Example consumer module: applies the `ksp` plugin, depends on `annotations` + `processor`, and demonstrates usage (`User.kt`, `Main.kt`). |
+| `annotations` | The annotations (`@Validated`, `@ByteRange`, `@Regex`, ...). What consumer code depends on. |
+| `compiler-plugin` | The Kotlin compiler plugin behind `@Validated`. |
+| `app` | Example consumer using the compiler plugin (`User.kt`, `Main.kt`). |
 
-## Building
+## Building and running
 
 ```bash
 ./gradlew build
-```
-
-The `app` module doesn't apply the `application` plugin, so there's no
-`run` task; run `Main.kt` from your IDE, or add
-`plugins { application }` + `application { mainClass = "..." }` if you want
-a `./gradlew :app:run` task.
-
-Inspect what KSP generated for a given module:
-
-```bash
-./gradlew :app:kspKotlin
-find app/build/generated/ksp -name '*.kt'
+./gradlew :app:run
 ```
 
 ## Requirements
 
 - JDK 17 (configured via `jvmToolchain(17)` in each module).
-- The Kotlin and KSP plugin versions must stay in lockstep — KSP releases
-  are versioned `<kotlinVersion>-<kspBuild>` and only work against that
-  exact Kotlin compiler version. See `gradle/libs.versions.toml`.
+- The compiler plugin uses the Kotlin compiler's internal APIs, so it must be
+  built with exactly the same Kotlin version as the code it compiles
+  (`kotlin` in `gradle/libs.versions.toml`, currently 2.4.10).
 
 ## Known limitations
 
-- The annotated class must be visible to its generated `*Validator` (avoid
-  `private` top-level classes if you construct the validator from another
-  file).
-- Only primary-constructor properties are validated; properties declared in
-  the class body (e.g. `lateinit var`) are not constraint-checked, though
-  they no longer break generation.
-- `validate()` throws on the first invalid property rather than collecting
-  every violation.
+- A `@Validated` subclass is linked to a `@Validated` superclass only when
+  both are compiled in the same module.
+- Code that creates objects without calling a constructor (reflection, some
+  deserializers) or writes fields directly isn't checked until `validate()`
+  is called.
+- IntelliJ only runs its bundled compiler plugins by default, so it shows
+  `user.validate()` as unresolved even though the build works. To fix it,
+  turn off the registry key `kotlin.k2.only.bundled.compiler.plugins.enabled`
+  and reload the Gradle project.
+- `@Regex` builds a new `Regex` for each check.
+
+## Troubleshooting
+
+If a build fails with `Operation timed out` while reading a jar under
+`build/`, macOS iCloud ("Optimize Mac Storage") may have offloaded that file
+(`ls -lO` shows `dataless`). Delete the `build/` directories and build again.

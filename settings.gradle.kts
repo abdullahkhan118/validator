@@ -3,5 +3,5 @@ plugins {
 }
 rootProject.name = "validator"
 include("annotations")
-include("processor")
+include("compiler-plugin")
 include("app")

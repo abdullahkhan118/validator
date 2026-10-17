@@ -11,7 +11,7 @@ gradle-app.setting
 # Machine-specific paths and credentials; never commit
 local.properties
 
-### Kotlin / KSP ###
+### Kotlin ###
 .kotlin/
 kotlin-js-store/
 
