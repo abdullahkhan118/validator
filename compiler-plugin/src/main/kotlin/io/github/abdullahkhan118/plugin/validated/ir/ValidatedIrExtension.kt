@@ -14,10 +14,11 @@ import org.jetbrains.kotlin.cli.common.messages.MessageCollector
 import org.jetbrains.kotlin.descriptors.ClassKind
 import org.jetbrains.kotlin.descriptors.DescriptorVisibilities
 import org.jetbrains.kotlin.ir.IrStatement
-import org.jetbrains.kotlin.ir.builders.IrBlockBodyBuilder
 import org.jetbrains.kotlin.ir.builders.IrBuilderWithScope
+import org.jetbrains.kotlin.ir.builders.IrStatementsBuilder
 import org.jetbrains.kotlin.ir.builders.declarations.addFunction
 import org.jetbrains.kotlin.ir.builders.declarations.addValueParameter
+import org.jetbrains.kotlin.ir.builders.irBlock
 import org.jetbrains.kotlin.ir.builders.irBlockBody
 import org.jetbrains.kotlin.ir.builders.irCall
 import org.jetbrains.kotlin.ir.builders.irCallConstructor
@@ -29,12 +30,16 @@ import org.jetbrains.kotlin.ir.builders.irGetField
 import org.jetbrains.kotlin.ir.builders.irIfThen
 import org.jetbrains.kotlin.ir.builders.irIfThenElse
 import org.jetbrains.kotlin.ir.builders.irImplicitCast
+import org.jetbrains.kotlin.ir.builders.irInt
 import org.jetbrains.kotlin.ir.builders.irNotEquals
 import org.jetbrains.kotlin.ir.builders.irNull
 import org.jetbrains.kotlin.ir.builders.irReturn
+import org.jetbrains.kotlin.ir.builders.irSet
 import org.jetbrains.kotlin.ir.builders.irString
+import org.jetbrains.kotlin.ir.builders.irTemporary
 import org.jetbrains.kotlin.ir.builders.irTrue
 import org.jetbrains.kotlin.ir.builders.irUnit
+import org.jetbrains.kotlin.ir.builders.irWhile
 import org.jetbrains.kotlin.ir.declarations.IrClass
 import org.jetbrains.kotlin.ir.declarations.IrDeclarationOrigin
 import org.jetbrains.kotlin.ir.declarations.IrModuleFragment
@@ -50,17 +55,17 @@ import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
 import org.jetbrains.kotlin.ir.symbols.impl.IrAnonymousInitializerSymbolImpl
 import org.jetbrains.kotlin.ir.types.IrType
 import org.jetbrains.kotlin.ir.types.classFqName
-import org.jetbrains.kotlin.ir.types.classOrNull
 import org.jetbrains.kotlin.ir.types.classifierOrFail
 import org.jetbrains.kotlin.ir.types.isMarkedNullable
+import org.jetbrains.kotlin.ir.types.isNullable
 import org.jetbrains.kotlin.ir.types.makeNotNull
+import org.jetbrains.kotlin.ir.types.typeWith
 import org.jetbrains.kotlin.ir.util.constructors
 import org.jetbrains.kotlin.ir.util.createDispatchReceiverParameterWithClassParent
 import org.jetbrains.kotlin.ir.util.functions
 import org.jetbrains.kotlin.ir.util.hasAnnotation
 import org.jetbrains.kotlin.ir.util.isAnnotationClass
 import org.jetbrains.kotlin.ir.util.isInterface
-import org.jetbrains.kotlin.ir.util.parentAsClass
 import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
 import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 import org.jetbrains.kotlin.name.ClassId
@@ -83,10 +88,7 @@ import org.jetbrains.kotlin.name.Name
  *
  *         init { ... }                                                  // user's init blocks, unchanged
  *
- *         fun validate() {                                              // (2) declared by FIR, body from here
- *             validateDeclaredProperties()
- *         }
- *         private fun validateDeclaredProperties() {                    //     this class's own properties
+ *         private fun validate() {                                      // (2) this class's own properties
  *             validateAge(this.age)
  *             validateName(this.name)
  *         }
@@ -99,13 +101,29 @@ import org.jetbrains.kotlin.name.Name
  *             if (!Regex("[a-z]+").matches(value)) throw IllegalArgumentException(...)
  *         }
  *     }
- *     // (4) and every constructor ends with `validateDeclaredProperties()`
- *     //     (for an `object`: a last `init { validateDeclaredProperties() }`).
+ *     // (4) and every constructor ends with `validate()`
+ *     //     (for an `object`: a last `init { validate() }`).
  *
- * Inheritance: constructors call the PRIVATE validateDeclaredProperties(), not validate(). A private call
- * isn't virtual, so a superclass's constructor checks only its own properties and never runs a subclass's
- * checks before the subclass has set its fields. A @Validated subclass overrides the inherited public
- * validate() as `super.validate(); validateDeclaredProperties()`, so validate() covers the whole hierarchy.
+ * A constraint on a collection or array (see Elements.kt) checks every element, giving its position:
+ *
+ *     @IntRange(1, 5) val scores: List<Int>
+ *
+ *     private fun validateScores(value: List<Int>) {
+ *         val iterator = value.iterator()
+ *         var index = 0
+ *         while (iterator.hasNext()) {
+ *             val element = iterator.next()
+ *             if (element < 1 || element > 5) throw IllegalArgumentException("User.scores[" + index + "] must be between 1 and 5 but was " + element)
+ *             index = index + 1
+ *         }
+ *     }
+ *
+ * (A null element passes, like a null property.)
+ *
+ * validate() is private, so it can only run from the constructors: user code can't call it. Being private, it
+ * also isn't virtual, so in a hierarchy each class has its own: a superclass's constructor checks only its own
+ * properties and never runs a subclass's checks before the subclass has set its fields. Every class in the
+ * hierarchy that is @Validated validates its own properties at the end of its constructor.
  *
  * So an invalid object can't be created (the constructor throws), and an existing one can't be made
  * invalid through a setter (it throws before the field changes).
@@ -113,7 +131,7 @@ import org.jetbrains.kotlin.name.Name
 class ValidatedIrExtension(private val messages: MessageCollector) : IrGenerationExtension {
     override fun generate(moduleFragment: IrModuleFragment, pluginContext: IrPluginContext) {
         val symbols = ValidationSymbols.find(pluginContext, messages) ?: return
-        val reader = ConstraintReader(messages)
+        val reader = ConstraintReader(pluginContext, messages)
         moduleFragment.transformChildrenVoid(object : IrElementTransformerVoid() {
             override fun visitClass(declaration: IrClass): IrStatement {
                 // Nested classes first, then this one (adding functions to it while visiting is fine then).
@@ -185,50 +203,27 @@ private class ValidatedClassTransformer(
             return
         }
 
-        // Where the public validate() comes from:
-        //   - declared here by ValidatedFirGenerator (the topmost @Validated class), or
-        //   - inherited from a @Validated superclass: then this class only has the compiler's placeholder for
-        //     the inherited function (a "fake override"), which we turn into a real override below.
-        // Neither = the class wrote its own validate(), so FIR skipped it.
-        val generatedValidate = irClass.functions.firstOrNull { it.isGeneratedValidate() }
-        val inheritedValidate = if (generatedValidate == null && irClass.hasValidatedSuperclass()) {
-            irClass.functions.firstOrNull { it.isFakeOverride && it.isValidateSignature() }
-        } else null
-        if (generatedValidate == null && inheritedValidate == null) {
-            val own = irClass.functions.firstOrNull { it.isValidateSignature() && !it.isFakeOverride }
-            reader.error(irClass, own ?: irClass, "@Validated generates 'validate()', so ${irClass.name} can't declare its own. Remove it or the @Validated annotation.")
+        // The generated private validate() would clash with a validate() the class declares, or inherits from a
+        // superclass (a "fake override" here; a @Validated superclass's private validate() isn't inherited).
+        val existing = irClass.functions.firstOrNull { it.isValidateSignature() }
+        if (existing != null) {
+            val what = if (existing.isFakeOverride) "inherit" else "declare"
+            reader.error(irClass, if (existing.isFakeOverride) irClass else existing, "@Validated generates a private 'validate()', so ${irClass.name} can't $what one. Rename it or remove the @Validated annotation.")
             return
         }
 
-        // On misuse (already reported), still give validate() an (empty) body: the backend can't handle bodiless functions.
-        if (constraints.hasErrors) {
-            generatedValidate?.body = DeclarationIrBuilder(pluginContext, generatedValidate.symbol).irBlockBody { }
-            return
-        }
+        // On misuse (already reported), generate nothing.
+        if (constraints.hasErrors) return
 
         val validators = constraints.properties.associateWith { buildPropertyValidator(it) }
-        val validateDeclared = buildValidateDeclaredProperties(validators)
-        if (generatedValidate != null) fillGeneratedValidate(generatedValidate, validateDeclared)
-        if (inheritedValidate != null) overrideInheritedValidate(inheritedValidate, validateDeclared)
-        if (irClass.kind == ClassKind.OBJECT) validateInLastInitBlock(validateDeclared) else validateAtEndOfConstructors(validateDeclared)
+        val validate = buildValidate(validators)
+        if (irClass.kind == ClassKind.OBJECT) validateInLastInitBlock(validate) else validateAtEndOfConstructors(validate)
         validateAtStartOfSetters(validators)
-    }
-
-    private fun IrSimpleFunction.isGeneratedValidate(): Boolean {
-        val origin = origin
-        return origin is IrDeclarationOrigin.GeneratedByPlugin && origin.pluginKey == ValidatedKey &&
-            isValidateSignature() && body == null
     }
 
     /** `fun validate()`: that name, and no parameters besides `this`. */
     private fun IrSimpleFunction.isValidateSignature(): Boolean =
         name.asString() == ValidatedNames.VALIDATE && parameters.size == 1 && dispatchReceiverParameter != null
-
-    /** True if a superclass (direct or further up) is @Validated. */
-    private fun IrClass.hasValidatedSuperclass(): Boolean = superTypes.any { superType ->
-        val superClass = superType.classOrNull?.owner ?: return@any false
-        superClass.hasAnnotation(FqName(ValidatedNames.ANNOTATION)) || superClass.hasValidatedSuperclass()
-    }
 
     // ---------------------------------------------------------------------------------------------
     // (1) One private check per property: `private fun validateAge(value: Int)`
@@ -247,29 +242,82 @@ private class ValidatedClassTransformer(
         val value = function.addValueParameter("value", validated.type)
 
         function.body = DeclarationIrBuilder(pluginContext, function.symbol).irBlockBody {
-            // `value` with its `?` removed. A fresh node per use: an IR node can appear in only one place.
-            val nonNullType = validated.type.makeNotNull()
-            val read = { irImplicitCast(irGet(value), nonNullType) }
-
             if (validated.type.isMarkedNullable()) {
                 // if (value == null) return
                 +irIfThen(irBuiltIns.unitType, irEqualsNull(irGet(value)), irReturn(irUnit()))
             }
             val where = "${irClass.name}.$propertyName"
-            validated.constraints.forEach { constraint ->
-                when (constraint) {
-                    is Constraint.Range -> addRangeCheck(constraint, where, nonNullType, read)
-                    is Constraint.Distinct -> addDistinctCheck(constraint, where, read)
-                    is Constraint.Pattern -> addPatternCheck(constraint, where, read)
-                }
+            val (onElements, onValue) = validated.constraints.partition { it.onElements }
+            // `value` as the type each constraint checks (its `?` removed). A fresh node per use: an IR node can
+            // appear in only one place.
+            onValue.forEach { constraint ->
+                addCheck(constraint, { listOf(irString(where)) }, { irImplicitCast(irGet(value), constraint.type) })
             }
+            if (onElements.isNotEmpty()) addElementChecks(validated.elements!!, onElements, where, value)
         }
         return function
     }
 
+    /**
+     * Checks every element of the collection or array in [collection] against [constraints]:
+     * `while (iterator.hasNext()) { val element = iterator.next(); <checks>; index = index + 1 }`.
+     */
+    private fun IrStatementsBuilder<*>.addElementChecks(
+        elements: Elements,
+        constraints: List<Constraint>,
+        where: String,
+        collection: IrValueParameter,
+    ) {
+        val iteratorClass = irBuiltIns.iteratorClass
+        val hasNext = iteratorClass.functions.first { it.owner.name.asString() == "hasNext" }
+        val next = iteratorClass.functions.first { it.owner.name.asString() == "next" }
+
+        val iterator = irTemporary(
+            irCall(elements.iterator).apply { arguments[0] = irImplicitCast(irGet(collection), collection.type.makeNotNull()) },
+            nameHint = "iterator",
+            irType = iteratorClass.typeWith(elements.type),
+        )
+        val index = irTemporary(irInt(0), nameHint = "index", irType = irBuiltIns.intType, isMutable = true)
+        +irWhile().apply {
+            condition = irCall(hasNext).apply { arguments[0] = irGet(iterator) }
+            body = irBlock {
+                // Iterator<T>.next() returns T; typing the call as the element type makes the backend unbox it.
+                val element = irTemporary(
+                    irCall(next, elements.type).apply { arguments[0] = irGet(iterator) },
+                    nameHint = "element",
+                )
+                val whereAt = { listOf(irString("$where["), irGet(index), irString("]")) }
+                val checks = irBlock {
+                    constraints.forEach { constraint ->
+                        addCheck(constraint, whereAt, { irImplicitCast(irGet(element), constraint.type) })
+                    }
+                }
+                // A null element always passes, like a null property.
+                +if (elements.type.isNullable()) irIfThen(irBuiltIns.unitType, irNotEquals(irGet(element), irNull()), checks) else checks
+                +irSet(index, irCall(irBuiltIns.intPlusSymbol).apply {
+                    arguments[0] = irGet(index)
+                    arguments[1] = irInt(1)
+                })
+            }
+        }
+    }
+
+    /**
+     * Adds the check for one constraint. [where] builds the start of the message (`User.age`, or
+     * `User.scores[` + index + `]`); [read] gives the value to check.
+     */
+    private fun IrStatementsBuilder<*>.addCheck(constraint: Constraint, where: () -> List<IrExpression>, read: () -> IrExpression) {
+        when (constraint) {
+            is Constraint.Range -> addRangeCheck(constraint, where, read)
+            is Constraint.Distinct -> addDistinctCheck(constraint, where, read)
+            is Constraint.Pattern -> addPatternCheck(constraint, where, read)
+        }
+    }
+
     /** `if (value < min || value > max) throw ...`; a side without a limit isn't checked. */
-    private fun IrBlockBodyBuilder.addRangeCheck(constraint: Constraint.Range, where: String, type: IrType, read: () -> IrExpression) {
+    private fun IrStatementsBuilder<*>.addRangeCheck(constraint: Constraint.Range, where: () -> List<IrExpression>, read: () -> IrExpression) {
         val valueType = constraint.annotation.valueType
+        val type = constraint.type
         val tooSmall = constraint.min?.let { compare(irBuiltIns.lessFunByOperandType, type, read(), constant(valueType, it)) }
         val tooBig = constraint.max?.let { compare(irBuiltIns.greaterFunByOperandType, type, read(), constant(valueType, it)) }
         val invalid = listOfNotNull(tooSmall, tooBig).reduceOrNull { a, b -> or(a, b) } ?: return
@@ -282,7 +330,7 @@ private class ValidatedClassTransformer(
     }
 
     /** `if (!(value == a || value == b || ...)) throw ...` */
-    private fun IrBlockBodyBuilder.addDistinctCheck(constraint: Constraint.Distinct, where: String, read: () -> IrExpression) {
+    private fun IrStatementsBuilder<*>.addDistinctCheck(constraint: Constraint.Distinct, where: () -> List<IrExpression>, read: () -> IrExpression) {
         val valueType = constraint.annotation.valueType
         val isAllowed = constraint.values
             .map { irEquals(read(), constant(valueType, it)) }
@@ -293,7 +341,7 @@ private class ValidatedClassTransformer(
     }
 
     /** `if (!Regex(pattern).matches(value)) throw ...` */
-    private fun IrBlockBodyBuilder.addPatternCheck(constraint: Constraint.Pattern, where: String, read: () -> IrExpression) {
+    private fun IrStatementsBuilder<*>.addPatternCheck(constraint: Constraint.Pattern, where: () -> List<IrExpression>, read: () -> IrExpression) {
         // A new Regex per check: simple, and avoids a shared field that might not be initialized yet
         // when a setter runs during construction.
         val regex = irCallConstructor(symbols.regexConstructor, emptyList()).apply { arguments[0] = irString(constraint.pattern) }
@@ -304,10 +352,11 @@ private class ValidatedClassTransformer(
         +irIfThen(irBuiltIns.unitType, irNot(matches), throwInvalid(where, "match the pattern ${constraint.pattern}", read(), quote = true))
     }
 
-    /** `throw IllegalArgumentException("User.age must <rule> but was <value>")` */
-    private fun IrBuilderWithScope.throwInvalid(where: String, rule: String, value: IrExpression, quote: Boolean): IrExpression {
+    /** `throw IllegalArgumentException("User.age must <rule> but was <value>")`; [where] gives the `User.age` part. */
+    private fun IrBuilderWithScope.throwInvalid(where: () -> List<IrExpression>, rule: String, value: IrExpression, quote: Boolean): IrExpression {
         val message = irConcat().apply {
-            arguments.add(irString("$where must $rule but was ${if (quote) "\"" else ""}"))
+            arguments.addAll(where())
+            arguments.add(irString(" must $rule but was ${if (quote) "\"" else ""}"))
             arguments.add(value)
             if (quote) arguments.add(irString("\""))
         }
@@ -341,16 +390,16 @@ private class ValidatedClassTransformer(
     }
 
     // ---------------------------------------------------------------------------------------------
-    // (2) validate() and validateDeclaredProperties()
+    // (2) private fun validate()
     // ---------------------------------------------------------------------------------------------
 
     /**
-     * `private fun validateDeclaredProperties()`: checks the current value of each constrained property
-     * declared in THIS class. Called by constructors (not virtual, see the file header) and by validate().
+     * `private fun validate()`: checks the current value of each constrained property declared in THIS class.
+     * Called only by the constructors (not virtual, see the file header).
      */
-    private fun buildValidateDeclaredProperties(validators: Map<ValidatedProperty, IrSimpleFunction>): IrSimpleFunction {
+    private fun buildValidate(validators: Map<ValidatedProperty, IrSimpleFunction>): IrSimpleFunction {
         val function = irClass.addFunction {
-            name = Name.identifier(ValidatedNames.VALIDATE_DECLARED)
+            name = Name.identifier(ValidatedNames.VALIDATE)
             returnType = irBuiltIns.unitType
             visibility = DescriptorVisibilities.PRIVATE
             origin = IrDeclarationOrigin.GeneratedByPlugin(ValidatedKey)
@@ -379,33 +428,6 @@ private class ValidatedClassTransformer(
         return function
     }
 
-    /** The FIR-declared `validate()` of the topmost @Validated class: `validateDeclaredProperties()`. */
-    private fun fillGeneratedValidate(validate: IrSimpleFunction, validateDeclared: IrSimpleFunction) {
-        validate.body = DeclarationIrBuilder(pluginContext, validate.symbol).irBlockBody {
-            +irCall(validateDeclared.symbol).apply { arguments[0] = irGet(validate.dispatchReceiverParameter!!) }
-        }
-    }
-
-    /**
-     * In a @Validated subclass: turns the placeholder for the inherited `validate()` into a real override,
-     * `override fun validate() { super.validate(); validateDeclaredProperties() }`.
-     *
-     * The placeholder is changed in place rather than replaced, because calls such as `spider.validate()`
-     * compiled in this module already point to it.
-     */
-    private fun overrideInheritedValidate(placeholder: IrSimpleFunction, validateDeclared: IrSimpleFunction) {
-        val superValidate = placeholder.overriddenSymbols.first().owner
-        val superClass = superValidate.parentAsClass
-        placeholder.isFakeOverride = false
-        placeholder.origin = IrDeclarationOrigin.GeneratedByPlugin(ValidatedKey)
-        placeholder.body = DeclarationIrBuilder(pluginContext, placeholder.symbol).irBlockBody {
-            val self = placeholder.dispatchReceiverParameter!!
-            // `super.validate()`: a non-virtual call to the superclass's implementation.
-            +irCall(superValidate, superQualifierSymbol = superClass.symbol).apply { arguments[0] = irGet(self) }
-            +irCall(validateDeclared.symbol).apply { arguments[0] = irGet(self) }
-        }
-    }
-
     // ---------------------------------------------------------------------------------------------
     // (3) Setters: `set(value) { validateAge(value); <original setter> }`
     // ---------------------------------------------------------------------------------------------
@@ -425,11 +447,11 @@ private class ValidatedClassTransformer(
     }
 
     // ---------------------------------------------------------------------------------------------
-    // (4) Constructors: `validateDeclaredProperties()` as the last statement of each one
+    // (4) Constructors: `validate()` as the last statement of each one
     // ---------------------------------------------------------------------------------------------
 
     /**
-     * Appends `validateDeclaredProperties()` to every constructor. At the end of the primary constructor all
+     * Appends `validate()` to every constructor. At the end of the primary constructor all
      * property initializers and `init` blocks have run, so every value is final. A secondary constructor first
      * runs the one it delegates to (which validates), then its own body, then validates again.
      */
@@ -443,7 +465,7 @@ private class ValidatedClassTransformer(
     }
 
     /**
-     * For an `object`: adds `init { validateDeclaredProperties() }` as its last declaration.
+     * For an `object`: adds `init { validate() }` as its last declaration.
      *
      * The end of the constructor doesn't work for objects: on the JVM an object's properties become static
      * fields, initialized AFTER its (private) constructor has run, so validating there would see 0/null.

@@ -8,8 +8,8 @@ import io.github.abdullahkhan118.annotations.Validated
 
 /*
  * @Validated: the compiler plugin checks every annotated property when a User is created, and checks
- * `age` again whenever it's assigned. An invalid value throws IllegalArgumentException, so a User can
- * never hold invalid data. `user.validate()` re-checks everything on demand.
+ * `age` and `tags` again whenever they're assigned. An invalid value throws IllegalArgumentException, so a
+ * User can never hold invalid data.
  */
 @Validated
 class User(
@@ -23,5 +23,9 @@ class User(
 
     @ByteRange(10, 20)
     internal var age: Byte = 18
+
+    // On a collection, a constraint checks every element.
+    @Regex("[a-z]+")
+    var tags: List<String> = emptyList()
 
 }

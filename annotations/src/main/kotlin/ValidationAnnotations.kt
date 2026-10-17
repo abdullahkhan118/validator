@@ -5,12 +5,14 @@ package io.github.abdullahkhan118.annotations
  *
  * On a @Validated class, the checks are built into the class itself: every constructor validates, and
  * every annotated `var`'s setter checks the new value first, so an invalid object can't be created and an
- * existing one can't be made invalid. The plugin also adds a public `validate()` to re-check on demand.
+ * existing one can't be made invalid. The constructors run a generated `private fun validate()`.
  *
  * A failed check throws IllegalArgumentException. A `null` value always passes (use a non-null type to
  * forbid null).
  *
- * The constraints can only be placed on properties (including `val`/`var` constructor parameters).
+ * The constraints can only be placed on properties (including `val`/`var` constructor parameters). A property's
+ * type may be any subtype of the one a constraint applies to (`@Regex` takes any CharSequence). On a collection
+ * or array of such values (List, Set, any other Iterable, Array, IntArray, ...), the constraint checks each element.
  */
 
 /** Validates the class with the compiler plugin: on creation (every constructor) and on every update of an annotated `var`. */
@@ -64,6 +66,6 @@ annotation class DoubleDistinct(vararg val values: Double)
 @Target(AnnotationTarget.PROPERTY) @Retention(AnnotationRetention.BINARY)
 annotation class StringDistinct(vararg val values: String)
 
-/** The whole value must match [pattern]. The pattern's syntax is checked at compile time. */
+/** The whole value (any CharSequence) must match [pattern]. The pattern's syntax is checked at compile time. */
 @Target(AnnotationTarget.PROPERTY) @Retention(AnnotationRetention.BINARY)
 annotation class Regex(val pattern: String)

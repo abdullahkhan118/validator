@@ -35,7 +35,6 @@ class User(
 ```kotlin
 val user = User("abdullah", 2, "mid")   // OK
 user.age = 15                           // OK
-user.validate()                         // generated: re-checks every property on demand
 
 User("abdullah", 9, "mid")  // IllegalArgumentException: User.level must be one of [1, 2, 3, 4, 5] but was 9
 user.age = 25               // IllegalArgumentException: User.age must be between 10 and 20 but was 25
@@ -51,9 +50,7 @@ class User(name: String, level: Byte, type: String) {
     internal var age: Byte = 18
         set(value) { validateAge(value); field = value }    // setters check first
 
-    fun validate() = validateDeclaredProperties()           // public, for on-demand checks
-
-    private fun validateDeclaredProperties() {               // this class's own properties
+    private fun validate() {                                 // this class's own properties
         validateName(name); validateLevel(level); validateType(type); validateAge(age)
     }
 
@@ -62,7 +59,7 @@ class User(name: String, level: Byte, type: String) {
     }
     // ...
 }
-// ...and every constructor ends with validateDeclaredProperties().
+// ...and every constructor ends with validate().
 ```
 
 It works with:
@@ -72,22 +69,39 @@ It works with:
 - `lateinit var` (checked once it's assigned),
 - `private var` (checked when changed from inside the class),
 - secondary constructors, data class `copy()`, and `object`s,
-- inheritance: each class validates its own properties during construction,
-  and `validate()` on a subclass checks the whole hierarchy.
+- inheritance: each `@Validated` class in a hierarchy validates its own
+  properties at the end of its own constructor,
+- subtypes: a constraint fits any subtype of the type it applies to, e.g.
+  `@Regex` on a `String`, `StringBuilder` or any other `CharSequence`,
+- collections and arrays: on a `List<Int>`, `Set<Int>`, `IntArray`,
+  `Array<Int>`, or any other `Iterable` subtype (`ArrayList<Int>`, your own
+  `class Scores : ArrayList<Int>()`, a `T : List<Int>`), the constraint checks
+  every element. A `null` element passes.
+
+```kotlin
+@Validated
+class Team(@IntRange(1, 5) val ratings: List<Int>, @Regex("[a-z]+") val tags: Set<String>)
+
+Team(listOf(4, 9), setOf("kotlin"))  // IllegalArgumentException: Team.ratings[1] must be between 1 and 5 but was 9
+```
+
+For a `Set` or other unordered collection, the `[index]` is the position in
+iteration order.
 
 ### Compile-time errors
 
 Misused annotations fail the build, pointing at the annotation:
 
 ```
-e: Bad.kt:8:11 [validated] @ByteRange can only be used on a kotlin.Byte property, but Bad.wrongType is kotlin.Int
+e: Bad.kt:8:11 [validated] @ByteRange can only be used on a kotlin.Byte property, or a collection or array of them, but Bad.wrongType is kotlin.Int
 e: Bad.kt:8:48 [validated] @IntRange on Bad.minAboveMax has min (10) greater than max (1)
 e: Bad.kt:8:99 [validated] @IntDistinct on Bad.noValues lists no allowed values
 e: Bad.kt:8:133 [validated] @Regex on Bad.brokenPattern has an invalid pattern: Unclosed character class near index 3
 ```
 
 Also an error: `@Validated` on an interface, annotation class or value class,
-and a `@Validated` class that declares its own `validate()`. Constraints in a
+and a `@Validated` class that declares or inherits a `validate()` (it would
+clash with the generated private one). Constraints in a
 class without `@Validated` are a warning (they'd have no effect).
 
 ### Using it
@@ -118,14 +132,15 @@ tasks.named("compileKotlin") {
 | --- | --- |
 | `plugin` | `ValidatorCompilerPluginRegistrar`, the entry point (found via `META-INF/services`) |
 | `plugin.validated` | names, and the table of constraint annotations |
-| `plugin.validated.fir` | FIR: declares the public `validate()` so user code can call it |
-| `plugin.validated.ir` | IR: reads the annotations, reports misuse, builds the checks, wires them into constructors and setters |
-| `plugin.util.fir` / `plugin.util.ir` | reusable helpers (`BaseFirDeclarationGenerationExtension`, `addCallAtStart`, ...) |
+| `plugin.validated.ir` | IR: reads the annotations, reports misuse, builds the checks, wires them into constructors and setters (`Elements.kt`: element types of collections and arrays) |
+| `plugin.util.ir` | reusable IR helpers (`addCallAtStart`, ...) |
 
 ## Supported annotations
 
 All in the `annotations` module (`io.github.abdullahkhan118.annotations`).
 They can only be placed on properties (including `val`/`var` constructor parameters).
+"Applies to" includes subtypes, and collections or arrays of those types (each
+element is checked).
 
 | Annotation | Applies to | Checks |
 | --- | --- | --- |
@@ -142,7 +157,7 @@ They can only be placed on properties (including `val`/`var` constructor paramet
 | `@FloatDistinct(vararg values)` | `Float` | value is one of `values` |
 | `@DoubleDistinct(vararg values)` | `Double` | value is one of `values` |
 | `@StringDistinct(vararg values)` | `String` | value is one of `values` |
-| `@Regex(pattern)` | `String` | the whole value matches `pattern` |
+| `@Regex(pattern)` | `CharSequence` (`String`, `StringBuilder`, ...) | the whole value matches `pattern` |
 
 For ranges, leaving `min` or `max` out means no limit on that side.
 
@@ -178,16 +193,14 @@ Multi-module Gradle project, versions pinned in `gradle/libs.versions.toml`:
 
 ## Known limitations
 
-- A `@Validated` subclass is linked to a `@Validated` superclass only when
-  both are compiled in the same module.
-- Code that creates objects without calling a constructor (reflection, some
-  deserializers) or writes fields directly isn't checked until `validate()`
-  is called.
-- IntelliJ only runs its bundled compiler plugins by default, so it shows
-  `user.validate()` as unresolved even though the build works. To fix it,
-  turn off the registry key `kotlin.k2.only.bundled.compiler.plugins.enabled`
-  and reload the Gradle project.
-- `@Regex` builds a new `Regex` for each check.
+- `validate()` is private, so there's no way to re-check an object on demand.
+  Code that creates objects without calling a constructor (reflection, some
+  deserializers) or writes fields directly isn't checked at all.
+- `@Regex` builds a new `Regex` for each check (for a collection: per element).
+- Changing a collection in place (`team.ratings.add(9)` on a `MutableList`)
+  doesn't go through a setter, so it isn't checked.
+- Nested collections (`List<List<Int>>`) and `Map`s aren't supported: the
+  constraint is a compile error there.
 
 ## Troubleshooting
 

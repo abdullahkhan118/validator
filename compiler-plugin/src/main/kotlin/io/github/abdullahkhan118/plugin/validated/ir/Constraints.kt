@@ -2,6 +2,7 @@ package io.github.abdullahkhan118.plugin.validated.ir
 
 import io.github.abdullahkhan118.plugin.validated.ConstraintAnnotation
 import io.github.abdullahkhan118.plugin.validated.ConstraintKind
+import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
 import org.jetbrains.kotlin.cli.common.messages.CompilerMessageLocation
 import org.jetbrains.kotlin.cli.common.messages.CompilerMessageSeverity
 import org.jetbrains.kotlin.cli.common.messages.MessageCollector
@@ -12,11 +13,17 @@ import org.jetbrains.kotlin.ir.expressions.IrConst
 import org.jetbrains.kotlin.ir.expressions.IrConstructorCall
 import org.jetbrains.kotlin.ir.expressions.IrExpression
 import org.jetbrains.kotlin.ir.expressions.IrVararg
+import org.jetbrains.kotlin.ir.symbols.IrClassSymbol
 import org.jetbrains.kotlin.ir.types.IrType
 import org.jetbrains.kotlin.ir.types.classFqName
+import org.jetbrains.kotlin.ir.types.defaultType
+import org.jetbrains.kotlin.ir.types.isSubtypeOfClass
 import org.jetbrains.kotlin.ir.types.makeNotNull
 import org.jetbrains.kotlin.ir.util.file
 import org.jetbrains.kotlin.ir.util.properties
+import org.jetbrains.kotlin.ir.util.render
+import org.jetbrains.kotlin.name.ClassId
+import org.jetbrains.kotlin.name.FqName
 import java.util.regex.PatternSyntaxException
 
 /*
@@ -25,28 +32,56 @@ import java.util.regex.PatternSyntaxException
  * In IR an annotation is a constructor call, e.g. `@IntRange(18, 65)` is `IntRange(min = 18, max = 65)`
  * with constant arguments. A `vararg` argument (`@IntDistinct(1, 2, 3)`) is an IrVararg holding the constants.
  * Arguments left out are null; for ranges they fall back to ConstraintAnnotation.defaultMin/defaultMax.
+ *
+ * Which values a constraint checks is decided by type, subtypes included: the property's own value if its type is
+ * a subtype of ConstraintAnnotation.appliesTo (`@Regex` on a String or a StringBuilder), otherwise each element if
+ * it's a collection or array of such values (`@IntRange` on a List<Int>, ArrayList<Int>, IntArray, ...; see Elements.kt).
  */
 
-/** One rule on one property, read from one annotation. Values are plain Kotlin values (Byte, Int, String, ...). */
+/**
+ * One rule on one property, read from one annotation. Values are plain Kotlin values (Byte, Int, String, ...).
+ *
+ * [type] is what a checked value is treated as (`Int`, or `CharSequence` for `@Regex`), and [onElements] says
+ * whether the rule applies to the property's value itself or to each of its elements.
+ */
 sealed interface Constraint {
     val annotation: ConstraintAnnotation
+    val type: IrType
+    val onElements: Boolean
 
     /** `min..max`, inclusive; null means "no limit" on that side. */
-    data class Range(override val annotation: ConstraintAnnotation, val min: Any?, val max: Any?) : Constraint
+    data class Range(
+        override val annotation: ConstraintAnnotation,
+        override val type: IrType,
+        override val onElements: Boolean,
+        val min: Any?,
+        val max: Any?,
+    ) : Constraint
 
     /** The value must equal one of [values]. */
-    data class Distinct(override val annotation: ConstraintAnnotation, val values: List<Any>) : Constraint
+    data class Distinct(
+        override val annotation: ConstraintAnnotation,
+        override val type: IrType,
+        override val onElements: Boolean,
+        val values: List<Any>,
+    ) : Constraint
 
     /** The whole value must match [pattern]. */
-    data class Pattern(override val annotation: ConstraintAnnotation, val pattern: String) : Constraint
+    data class Pattern(
+        override val annotation: ConstraintAnnotation,
+        override val type: IrType,
+        override val onElements: Boolean,
+        val pattern: String,
+    ) : Constraint
 }
 
 /**
  * A property with at least one constraint.
  *
  * @property type the property's type, e.g. `Int` or `String?`. A nullable property accepts null.
+ * @property elements how to go over its elements, if it's a collection or array (whether or not a constraint uses them).
  */
-class ValidatedProperty(val property: IrProperty, val type: IrType, val constraints: List<Constraint>)
+class ValidatedProperty(val property: IrProperty, val type: IrType, val elements: Elements?, val constraints: List<Constraint>)
 
 /**
  * The result of reading a class: its constrained properties, and whether any annotation was used wrongly
@@ -55,16 +90,20 @@ class ValidatedProperty(val property: IrProperty, val type: IrType, val constrai
 class ClassConstraints(val properties: List<ValidatedProperty>, val hasErrors: Boolean)
 
 /** Reads constraints and reports misuse through [messages], pointing at the annotation in the source. */
-class ConstraintReader(private val messages: MessageCollector) {
+class ConstraintReader(private val pluginContext: IrPluginContext, private val messages: MessageCollector) {
     private var hasErrors = false
+
+    /** The class each annotation applies to, looked up once. */
+    private val appliesTo = mutableMapOf<ConstraintAnnotation, IrClassSymbol?>()
 
     /** Every property declared in [irClass] (not inherited) that has a constraint annotation. */
     fun read(irClass: IrClass): ClassConstraints {
         hasErrors = false
         val properties = irClass.properties.filter { !it.isFakeOverride }.mapNotNull { property ->
             val type = property.getter?.returnType ?: property.backingField?.type ?: return@mapNotNull null
-            val constraints = property.annotations.mapNotNull { annotation -> readConstraint(irClass, property, type, annotation) }
-            if (constraints.isEmpty()) null else ValidatedProperty(property, type, constraints)
+            val elements = pluginContext.irBuiltIns.elementsOf(type)
+            val constraints = property.annotations.mapNotNull { annotation -> readConstraint(irClass, property, type, elements, annotation) }
+            if (constraints.isEmpty()) null else ValidatedProperty(property, type, elements, constraints)
         }.toList()
         return ClassConstraints(properties, hasErrors)
     }
@@ -96,17 +135,35 @@ class ConstraintReader(private val messages: MessageCollector) {
      * The constraint described by [annotation], or null if it isn't a constraint annotation, or is used wrongly
      * (then an error was reported).
      */
-    private fun readConstraint(irClass: IrClass, property: IrProperty, type: IrType, annotation: IrConstructorCall): Constraint? {
+    private fun readConstraint(
+        irClass: IrClass,
+        property: IrProperty,
+        type: IrType,
+        elements: Elements?,
+        annotation: IrConstructorCall,
+    ): Constraint? {
         val constraint = ConstraintAnnotation.byFqName(annotation.type.classFqName?.asString()) ?: return null
         val where = "${irClass.name}.${property.name}"
         val annotationName = "@${constraint.simpleName}"
 
-        // The annotation's type must match the property's (ignoring `?`): @IntRange only on Int, etc.
-        val propertyType = type.makeNotNull().classFqName?.asString()
-        if (propertyType != constraint.valueType.fqName) {
-            error(irClass, annotation, "$annotationName can only be used on a ${constraint.valueType.fqName} property, but $where is $propertyType")
+        // The property's type (ignoring `?`), or else its element type, must be a subtype of the annotation's:
+        // @IntRange on an Int or a List<Int>, @Regex on a String, a StringBuilder or a Set<String>, etc.
+        val accepted = appliesTo.getOrPut(constraint) {
+            pluginContext.referenceClass(ClassId.topLevel(FqName(constraint.appliesTo)))
+        }
+        if (accepted == null) {
+            error(irClass, annotation, "$annotationName: ${constraint.appliesTo} not found")
             return null
         }
+        val onElements = when {
+            type.makeNotNull().isSubtypeOfClass(accepted) -> false
+            elements != null && elements.type.makeNotNull().isSubtypeOfClass(accepted) -> true
+            else -> {
+                error(irClass, annotation, "$annotationName can only be used on a ${constraint.appliesTo} property, or a collection or array of them, but $where is ${type.makeNotNull().render()}")
+                return null
+            }
+        }
+        val checkedType = accepted.defaultType
 
         val arguments = annotation.argumentsByName()
         return when (constraint.kind) {
@@ -120,6 +177,8 @@ class ConstraintReader(private val messages: MessageCollector) {
                 // A side left at its default is no limit at all, so it's not checked.
                 Constraint.Range(
                     constraint,
+                    checkedType,
+                    onElements,
                     min = min.takeIf { it != constraint.defaultMin },
                     max = max.takeIf { it != constraint.defaultMax },
                 )
@@ -130,7 +189,7 @@ class ConstraintReader(private val messages: MessageCollector) {
                     error(irClass, annotation, "$annotationName on $where lists no allowed values")
                     return null
                 }
-                Constraint.Distinct(constraint, values)
+                Constraint.Distinct(constraint, checkedType, onElements, values)
             }
             ConstraintKind.REGEX -> {
                 val pattern = arguments["pattern"]?.constValue() as? String
@@ -145,7 +204,7 @@ class ConstraintReader(private val messages: MessageCollector) {
                     error(irClass, annotation, "$annotationName on $where has an invalid pattern: ${e.description} near index ${e.index}")
                     return null
                 }
-                Constraint.Pattern(constraint, pattern)
+                Constraint.Pattern(constraint, checkedType, onElements, pattern)
             }
         }
     }

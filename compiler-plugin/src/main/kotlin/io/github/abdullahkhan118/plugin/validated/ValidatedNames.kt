@@ -2,7 +2,7 @@ package io.github.abdullahkhan118.plugin.validated
 
 import org.jetbrains.kotlin.GeneratedDeclarationKey
 
-/** Names shared by the FIR part (declares validate()) and the IR part (writes it and the checks). */
+/** Names of @Validated and of the functions the plugin generates. */
 object ValidatedNames {
     /** Package of the annotations in the runtime module. */
     const val PACKAGE = "io.github.abdullahkhan118.annotations"
@@ -10,21 +10,18 @@ object ValidatedNames {
     /** `@Validated`, put on a class to turn validation on. */
     const val ANNOTATION = "$PACKAGE.Validated"
 
-    /** The public function that checks every annotated property: `user.validate()`. */
+    /** The private function checking the properties declared in that class; called by its constructors. */
     const val VALIDATE = "validate"
-
-    /** The private function checking only the properties declared in that class; called by its constructors. */
-    const val VALIDATE_DECLARED = "validateDeclaredProperties"
 
     /** Name of the private check generated for one property, e.g. `age` -> `validateAge`. */
     fun propertyValidatorName(propertyName: String) =
         VALIDATE + propertyName.replaceFirstChar { it.uppercaseChar() }
 }
 
-/** Tag on the FIR-declared `validate()`, so the IR part can find it and write its body. */
+/** Origin tag on every declaration the plugin generates. */
 object ValidatedKey : GeneratedDeclarationKey()
 
-/** The type a constraint annotation applies to, as its fully qualified name. */
+/** The type of a constraint annotation's arguments (and of the values it checks), as its fully qualified name. */
 enum class ValueType(val fqName: String) {
     BYTE("kotlin.Byte"),
     SHORT("kotlin.Short"),
@@ -41,6 +38,9 @@ enum class ConstraintKind { RANGE, DISTINCT, REGEX }
 /**
  * Every constraint annotation the plugin understands, with what it applies to and checks.
  *
+ * [appliesTo] is the class a checked value must be (a subtype of): the property's type, or its element type for a
+ * collection or array. Usually the [valueType] itself (only Int is an Int); `@Regex` takes any CharSequence.
+ *
  * For ranges, [defaultMin]/[defaultMax] are used when the annotation leaves `min`/`max` out.
  * They must match the defaults declared in the annotations module's ValidationAnnotations.kt: the plugin can't
  * reliably read default values of an annotation compiled in another module, so it repeats them.
@@ -51,6 +51,7 @@ enum class ConstraintAnnotation(
     val kind: ConstraintKind,
     val defaultMin: Any? = null,
     val defaultMax: Any? = null,
+    val appliesTo: String = valueType.fqName,
 ) {
     BYTE_RANGE("ByteRange", ValueType.BYTE, ConstraintKind.RANGE, Byte.MIN_VALUE, Byte.MAX_VALUE),
     SHORT_RANGE("ShortRange", ValueType.SHORT, ConstraintKind.RANGE, Short.MIN_VALUE, Short.MAX_VALUE),
@@ -67,7 +68,7 @@ enum class ConstraintAnnotation(
     DOUBLE_DISTINCT("DoubleDistinct", ValueType.DOUBLE, ConstraintKind.DISTINCT),
     STRING_DISTINCT("StringDistinct", ValueType.STRING, ConstraintKind.DISTINCT),
 
-    REGEX("Regex", ValueType.STRING, ConstraintKind.REGEX),
+    REGEX("Regex", ValueType.STRING, ConstraintKind.REGEX, appliesTo = "kotlin.CharSequence"),
     ;
 
     /** e.g. "io.github.abdullahkhan118.annotations.IntRange". */
