@@ -1,11 +1,11 @@
-package io.github.abdullahkhan118.plugin.validated
+package io.github.abdullahkhan118.validator.plugin.validated
 
 import org.jetbrains.kotlin.GeneratedDeclarationKey
 
 /** Names of @Validated and of the functions the plugin generates. */
 object ValidatedNames {
     /** Package of the annotations in the runtime module. */
-    const val PACKAGE = "io.github.abdullahkhan118.annotations"
+    const val PACKAGE = "io.github.abdullahkhan118.validator.annotations"
 
     /** `@Validated`, put on a class to turn validation on. */
     const val ANNOTATION = "$PACKAGE.Validated"
@@ -77,7 +77,7 @@ enum class ConstraintAnnotation(
     REGEX("Regex", ValueType.STRING, ConstraintKind.REGEX, appliesTo = "kotlin.CharSequence"),
     ;
 
-    /** e.g. "io.github.abdullahkhan118.annotations.IntRange". */
+    /** e.g. "io.github.abdullahkhan118.validator.annotations.IntRange". */
     val fqName: String get() = "${ValidatedNames.PACKAGE}.$simpleName"
 
     companion object {

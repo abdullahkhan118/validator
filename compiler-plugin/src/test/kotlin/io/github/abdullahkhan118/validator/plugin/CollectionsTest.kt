@@ -1,4 +1,4 @@
-package io.github.abdullahkhan118.plugin
+package io.github.abdullahkhan118.validator.plugin
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -7,10 +7,10 @@ import kotlin.test.assertEquals
 class CollectionsTest {
     private val compiled = compileOk(
         """
-        import io.github.abdullahkhan118.annotations.*
-        import io.github.abdullahkhan118.annotations.IntRange
-        import io.github.abdullahkhan118.annotations.LongRange
-        import io.github.abdullahkhan118.annotations.Regex
+        import io.github.abdullahkhan118.validator.annotations.*
+        import io.github.abdullahkhan118.validator.annotations.IntRange
+        import io.github.abdullahkhan118.validator.annotations.LongRange
+        import io.github.abdullahkhan118.validator.annotations.Regex
 
         class Scores(vararg scores: Int) : ArrayList<Int>(scores.toList())
         abstract class Box<T> : Iterable<T>

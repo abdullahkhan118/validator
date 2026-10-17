@@ -6,8 +6,6 @@ plugins {
     application
 }
 
-group = "io.github.abdullahkhan118"
-version = "1.0-SNAPSHOT"
 
 repositories {
     mavenCentral()
@@ -39,7 +37,7 @@ tasks.named("compileKotlin") {
 }
 
 application {
-    mainClass = "io.github.abdullahkhan118.MainKt"
+    mainClass = "io.github.abdullahkhan118.validator.sample.MainKt"
 }
 
 tasks.test {

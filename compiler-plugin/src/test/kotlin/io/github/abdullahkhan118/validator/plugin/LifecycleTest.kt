@@ -1,4 +1,4 @@
-package io.github.abdullahkhan118.plugin
+package io.github.abdullahkhan118.validator.plugin
 
 import java.lang.reflect.Modifier
 import kotlin.test.Test
@@ -10,9 +10,9 @@ import kotlin.test.assertTrue
 class LifecycleTest {
     private val compiled = compileOk(
         """
-        import io.github.abdullahkhan118.annotations.*
-        import io.github.abdullahkhan118.annotations.IntRange
-        import io.github.abdullahkhan118.annotations.Regex
+        import io.github.abdullahkhan118.validator.annotations.*
+        import io.github.abdullahkhan118.validator.annotations.IntRange
+        import io.github.abdullahkhan118.validator.annotations.Regex
 
         @Validated
         class Account(@IntRange(0, 9) var balance: Int) {
@@ -128,7 +128,7 @@ class LifecycleTest {
     fun `validate() can't be called from outside the class`() {
         val result = compile(
             """
-            import io.github.abdullahkhan118.annotations.*
+            import io.github.abdullahkhan118.validator.annotations.*
             @Validated class A(@IntDistinct(1) val one: Int)
             fun f() = A(1).validate()
             """,

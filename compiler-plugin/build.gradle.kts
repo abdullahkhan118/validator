@@ -1,9 +1,10 @@
+import com.vanniktech.maven.publish.JavadocJar
+import com.vanniktech.maven.publish.KotlinJvm
+
 plugins {
     alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.maven.publish)
 }
-
-group = "io.github.abdullahkhan118"
-version = "1.0-SNAPSHOT"
 
 repositories {
     mavenCentral()
@@ -22,6 +23,13 @@ dependencies {
 
 kotlin {
     jvmToolchain(17)
+}
+
+mavenPublishing {
+    configure(KotlinJvm(javadocJar = JavadocJar.Empty(), sourcesJar = true))
+    publishToMavenCentral()
+    // Maven Central requires signatures; local publishing (publishToMavenLocal) works without a key.
+    if (providers.gradleProperty("signingInMemoryKey").isPresent) signAllPublications()
 }
 
 tasks.test {

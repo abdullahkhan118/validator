@@ -1,4 +1,4 @@
-package io.github.abdullahkhan118.plugin
+package io.github.abdullahkhan118.validator.plugin
 
 import java.lang.reflect.Modifier
 import kotlin.test.Test
@@ -13,9 +13,9 @@ class NestedTest {
     // a collection, array or StringBuilder it holds in place: that's what @Validate catches.
     private val compiled = compileOk(
         """
-        import io.github.abdullahkhan118.annotations.*
-        import io.github.abdullahkhan118.annotations.IntRange
-        import io.github.abdullahkhan118.annotations.Regex
+        import io.github.abdullahkhan118.validator.annotations.*
+        import io.github.abdullahkhan118.validator.annotations.IntRange
+        import io.github.abdullahkhan118.validator.annotations.Regex
 
         // Declared after its users: bridges exist before any class is transformed.
         @Validated
@@ -111,7 +111,7 @@ class NestedTest {
     fun `the bridge can't be called from Kotlin source`() {
         val result = compile(
             """
-            import io.github.abdullahkhan118.annotations.*
+            import io.github.abdullahkhan118.validator.annotations.*
             @Validated class A(@IntDistinct(1) val one: Int)
             fun f() = A(1).`validate${'$'}validated`()
             """,
@@ -124,15 +124,15 @@ class NestedTest {
         val library = compileOk(
             """
             package lib
-            import io.github.abdullahkhan118.annotations.*
-            import io.github.abdullahkhan118.annotations.IntRange
+            import io.github.abdullahkhan118.validator.annotations.*
+            import io.github.abdullahkhan118.validator.annotations.IntRange
             @Validated open class Base(@IntRange(0, 9) val level: IntArray)
             @Validated class Item(@IntRange(1, 5) val size: IntArray) : Base(intArrayOf(0))
             """,
         )
         val app = compileOk(
             """
-            import io.github.abdullahkhan118.annotations.*
+            import io.github.abdullahkhan118.validator.annotations.*
             import lib.*
             @Validated class Order(@Validate val items: List<Item>)
             // Extends a @Validated class of the library: its bridge overrides the library's.

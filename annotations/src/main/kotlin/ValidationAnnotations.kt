@@ -1,4 +1,4 @@
-package io.github.abdullahkhan118.annotations
+package io.github.abdullahkhan118.validator.annotations
 
 /*
  * Constraint annotations for the validator compiler plugin (`compiler-plugin` module).

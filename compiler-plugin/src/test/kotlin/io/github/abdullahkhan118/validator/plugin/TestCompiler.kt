@@ -1,6 +1,6 @@
-package io.github.abdullahkhan118.plugin
+package io.github.abdullahkhan118.validator.plugin
 
-import io.github.abdullahkhan118.annotations.Validated
+import io.github.abdullahkhan118.validator.annotations.Validated
 import org.jetbrains.kotlin.cli.common.ExitCode
 import org.jetbrains.kotlin.cli.common.arguments.K2JVMCompilerArguments
 import org.jetbrains.kotlin.cli.common.messages.CompilerMessageSeverity

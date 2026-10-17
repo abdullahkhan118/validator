@@ -1,6 +1,6 @@
-package io.github.abdullahkhan118.plugin
+package io.github.abdullahkhan118.validator.plugin
 
-import io.github.abdullahkhan118.plugin.validated.ir.ValidatedIrExtension
+import io.github.abdullahkhan118.validator.plugin.validated.ir.ValidatedIrExtension
 import org.jetbrains.kotlin.backend.common.extensions.IrGenerationExtension
 import org.jetbrains.kotlin.cli.common.messages.MessageCollector
 import org.jetbrains.kotlin.compiler.plugin.CompilerPluginRegistrar

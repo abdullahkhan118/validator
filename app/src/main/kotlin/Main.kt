@@ -1,4 +1,4 @@
-package io.github.abdullahkhan118
+package io.github.abdullahkhan118.validator.sample
 
 fun main() {
     // Valid: created and updated without complaint.

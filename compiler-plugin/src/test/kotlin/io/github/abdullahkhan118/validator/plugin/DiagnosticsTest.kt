@@ -1,4 +1,4 @@
-package io.github.abdullahkhan118.plugin
+package io.github.abdullahkhan118.validator.plugin
 
 import org.jetbrains.kotlin.cli.common.ExitCode
 import kotlin.test.Test
@@ -8,9 +8,9 @@ import kotlin.test.assertTrue
 /** Misused annotations are compile errors (or warnings) pointing at the source. */
 class DiagnosticsTest {
     private val imports = """
-        import io.github.abdullahkhan118.annotations.*
-        import io.github.abdullahkhan118.annotations.IntRange
-        import io.github.abdullahkhan118.annotations.Regex
+        import io.github.abdullahkhan118.validator.annotations.*
+        import io.github.abdullahkhan118.validator.annotations.IntRange
+        import io.github.abdullahkhan118.validator.annotations.Regex
     """.trimIndent()
 
     /** Compiles [declarations] and asserts it fails with exactly [expected] errors (each matched by its end). */

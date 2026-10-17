@@ -1,4 +1,4 @@
-package io.github.abdullahkhan118.plugin.validated.ir
+package io.github.abdullahkhan118.validator.plugin.validated.ir
 
 import org.jetbrains.kotlin.ir.IrBuiltIns
 import org.jetbrains.kotlin.ir.symbols.IrClassSymbol

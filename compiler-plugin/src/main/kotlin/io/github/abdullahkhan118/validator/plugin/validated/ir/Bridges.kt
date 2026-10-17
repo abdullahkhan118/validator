@@ -1,6 +1,6 @@
-package io.github.abdullahkhan118.plugin.validated.ir
+package io.github.abdullahkhan118.validator.plugin.validated.ir
 
-import io.github.abdullahkhan118.plugin.validated.ValidatedNames
+import io.github.abdullahkhan118.validator.plugin.validated.ValidatedNames
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
 import org.jetbrains.kotlin.descriptors.ClassKind
 import org.jetbrains.kotlin.descriptors.DescriptorVisibilities

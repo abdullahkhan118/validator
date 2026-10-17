@@ -1,9 +1,9 @@
-package io.github.abdullahkhan118.plugin.validated.ir
+package io.github.abdullahkhan118.validator.plugin.validated.ir
 
-import io.github.abdullahkhan118.plugin.util.ir.addCallAtStart
-import io.github.abdullahkhan118.plugin.validated.ValidatedKey
-import io.github.abdullahkhan118.plugin.validated.ValidatedNames
-import io.github.abdullahkhan118.plugin.validated.ValueType
+import io.github.abdullahkhan118.validator.plugin.util.ir.addCallAtStart
+import io.github.abdullahkhan118.validator.plugin.validated.ValidatedKey
+import io.github.abdullahkhan118.validator.plugin.validated.ValidatedNames
+import io.github.abdullahkhan118.validator.plugin.validated.ValueType
 import org.jetbrains.kotlin.backend.common.IrElementTransformerVoidWithContext
 import org.jetbrains.kotlin.backend.common.extensions.IrGenerationExtension
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext

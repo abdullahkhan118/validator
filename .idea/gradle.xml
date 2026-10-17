@@ -11,6 +11,7 @@
             <option value="$PROJECT_DIR$/annotations" />
             <option value="$PROJECT_DIR$/app" />
             <option value="$PROJECT_DIR$/compiler-plugin" />
+            <option value="$PROJECT_DIR$/gradle-plugin" />
           </set>
         </option>
         <option name="myGradleHome" value="" />

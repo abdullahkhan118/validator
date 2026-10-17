@@ -1,4 +1,4 @@
-package io.github.abdullahkhan118.plugin.util.ir
+package io.github.abdullahkhan118.validator.plugin.util.ir
 
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
 import org.jetbrains.kotlin.backend.common.lower.DeclarationIrBuilder

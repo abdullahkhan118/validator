@@ -1,10 +1,10 @@
-package io.github.abdullahkhan118
+package io.github.abdullahkhan118.validator.sample
 
-import io.github.abdullahkhan118.annotations.ByteDistinct
-import io.github.abdullahkhan118.annotations.ByteRange
-import io.github.abdullahkhan118.annotations.Regex
-import io.github.abdullahkhan118.annotations.StringDistinct
-import io.github.abdullahkhan118.annotations.Validated
+import io.github.abdullahkhan118.validator.annotations.ByteDistinct
+import io.github.abdullahkhan118.validator.annotations.ByteRange
+import io.github.abdullahkhan118.validator.annotations.Regex
+import io.github.abdullahkhan118.validator.annotations.StringDistinct
+import io.github.abdullahkhan118.validator.annotations.Validated
 
 /*
  * @Validated: the compiler plugin checks every annotated property when a User is created, and checks

@@ -138,25 +138,44 @@ without `@Validated` are a warning (they'd have no effect).
 
 ### Using it
 
-The plugin is loaded straight from its jar (see `app/build.gradle.kts`):
+Apply the Gradle plugin. It adds the annotations to `implementation` and
+loads the compiler plugin into every Kotlin/JVM (and Android) compilation:
 
 ```kotlin
-evaluationDependsOn(":compiler-plugin")
-val validatorPluginJar = project(":compiler-plugin").tasks.named<Jar>("jar")
-
-kotlin {
-    compilerOptions {
-        freeCompilerArgs.addAll(
-            validatorPluginJar.flatMap { it.archiveFile }.map { listOf("-Xplugin=${it.asFile.absolutePath}") },
-        )
-    }
+// settings.gradle.kts
+pluginManagement {
+    repositories { mavenCentral(); gradlePluginPortal() }
 }
 
-tasks.named("compileKotlin") {
-    dependsOn(validatorPluginJar)
-    inputs.files(validatorPluginJar).withPropertyName("validatorPluginJar")
+// build.gradle.kts
+plugins {
+    kotlin("jvm") version "2.4.10"
+    id("io.github.abdullahkhan118.validator") version "0.1.0"
 }
 ```
+
+The compiler plugin uses the Kotlin compiler's internal APIs, so each version
+works with exactly one Kotlin version:
+
+| Validator | Kotlin |
+| --- | --- |
+| 0.1.0 | 2.4.10 |
+
+With any other Kotlin version, the build stops with a message saying so,
+instead of the compiler crashing.
+
+Without the Gradle plugin, add the two artifacts yourself:
+
+```kotlin
+dependencies {
+    implementation("io.github.abdullahkhan118.validator:validator-annotations:0.1.0")
+    kotlinCompilerPluginClasspath("io.github.abdullahkhan118.validator:validator-compiler-plugin:0.1.0")
+}
+```
+
+Inside this repository, `app` loads the plugin straight from its jar with
+`-Xplugin` (see `app/build.gradle.kts`), so changes to the plugin are picked
+up without publishing.
 
 ### How it's built
 
@@ -169,7 +188,7 @@ tasks.named("compileKotlin") {
 
 ## Supported annotations
 
-All in the `annotations` module (`io.github.abdullahkhan118.annotations`).
+All in the `annotations` module (`io.github.abdullahkhan118.validator.annotations`).
 They can only be placed on properties (including `val`/`var` constructor parameters).
 "Applies to" includes subtypes, and collections or arrays of those types (each
 element is checked).
@@ -197,7 +216,7 @@ For ranges, leaving `min` or `max` out means no limit on that side.
 `IntRange`, `LongRange` and `Regex` share their names with Kotlin's own
 `kotlin.ranges.IntRange`, `kotlin.ranges.LongRange` and `kotlin.text.Regex`,
 which are imported by default. Import them explicitly
-(`import io.github.abdullahkhan118.annotations.IntRange`); a star import
+(`import io.github.abdullahkhan118.validator.annotations.IntRange`); a star import
 loses to Kotlin's default imports.
 
 ## Project layout
@@ -206,9 +225,13 @@ Multi-module Gradle project, versions pinned in `gradle/libs.versions.toml`:
 
 | Module | Purpose |
 | --- | --- |
-| `annotations` | The annotations (`@Validated`, `@ByteRange`, `@Regex`, ...). What consumer code depends on. |
-| `compiler-plugin` | The Kotlin compiler plugin behind `@Validated`. |
-| `app` | Example consumer using the compiler plugin (`User.kt`, `Main.kt`). |
+| `annotations` | `validator-annotations`: the annotations (`@Validated`, `@ByteRange`, `@Regex`, ...). What consumer code depends on. Compiled for JVM 1.8. |
+| `compiler-plugin` | `validator-compiler-plugin`: the Kotlin compiler plugin behind `@Validated`. |
+| `gradle-plugin` | `validator-gradle-plugin`: the `io.github.abdullahkhan118.validator` Gradle plugin, which applies the two above. |
+| `app` | Example consumer using the compiler plugin (`User.kt`, `Main.kt`). Not published. |
+
+All published modules share the group `io.github.abdullahkhan118.validator`
+and the version in `gradle.properties`.
 
 ## Building and running
 
@@ -229,6 +252,47 @@ with the plugin jar loaded via `-Xplugin`, as a real build does
 compiled code to check what is accepted and rejected (`ConstraintsTest`,
 `CollectionsTest`, `LifecycleTest`, `NestedTest`, `DiagnosticsTest`).
 `NestedTest` also compiles two "modules", one using the other's classes.
+
+## Publishing
+
+Releases go to Maven Central through the Central Portal, using
+[`com.vanniktech.maven.publish`](https://github.com/vanniktech/gradle-maven-publish-plugin).
+The POM metadata (license, SCM, developer) is in `gradle.properties`.
+
+One-time setup:
+
+1. Sign in to [central.sonatype.com](https://central.sonatype.com) with
+   GitHub. The namespace `io.github.abdullahkhan118` is verified through the
+   GitHub account; it covers the `io.github.abdullahkhan118.validator` group.
+2. Generate a user token (*View Account* → *Generate User Token*).
+3. Create a GPG key and publish its public key to a key server:
+   ```bash
+   gpg --full-generate-key
+   gpg --keyserver keyserver.ubuntu.com --send-keys <KEY_ID>
+   ```
+4. Put the credentials in `~/.gradle/gradle.properties`. Keep them out of the repo:
+   ```properties
+   mavenCentralUsername=<token username>
+   mavenCentralPassword=<token password>
+   signingInMemoryKey=<output of: gpg --export-secret-keys --armor KEY_ID, newlines as \n>
+   signingInMemoryKeyPassword=<key passphrase>
+   ```
+
+Each release:
+
+1. Set `VERSION_NAME` in `gradle.properties`. When the Kotlin version changes,
+   add a row to the compatibility table above.
+2. Run `./gradlew publishToMavenCentral`. This uploads a signed deployment;
+   check it under *Deployments* on the portal, then click *Publish*.
+   `./gradlew publishAndReleaseToMavenCentral` uploads and publishes in one go.
+3. Tag the commit: `git tag v0.1.0 && git push origin v0.1.0`.
+
+`./gradlew publishToMavenLocal` publishes to `~/.m2` without signing, to try a
+version in another project (add `mavenLocal()` to its repositories).
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).
 
 ## Requirements
 

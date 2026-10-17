@@ -4,4 +4,5 @@ plugins {
 rootProject.name = "validator"
 include("annotations")
 include("compiler-plugin")
+include("gradle-plugin")
 include("app")

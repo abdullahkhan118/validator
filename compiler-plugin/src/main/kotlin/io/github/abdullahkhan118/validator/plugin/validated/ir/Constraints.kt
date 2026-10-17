@@ -1,8 +1,8 @@
-package io.github.abdullahkhan118.plugin.validated.ir
+package io.github.abdullahkhan118.validator.plugin.validated.ir
 
-import io.github.abdullahkhan118.plugin.validated.ConstraintAnnotation
-import io.github.abdullahkhan118.plugin.validated.ConstraintKind
-import io.github.abdullahkhan118.plugin.validated.ValidatedNames
+import io.github.abdullahkhan118.validator.plugin.validated.ConstraintAnnotation
+import io.github.abdullahkhan118.validator.plugin.validated.ConstraintKind
+import io.github.abdullahkhan118.validator.plugin.validated.ValidatedNames
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
 import org.jetbrains.kotlin.cli.common.messages.CompilerMessageLocation
 import org.jetbrains.kotlin.cli.common.messages.CompilerMessageSeverity
