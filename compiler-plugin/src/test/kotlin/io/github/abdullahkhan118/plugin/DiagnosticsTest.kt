@@ -79,6 +79,21 @@ class DiagnosticsTest {
     }
 
     @Test
+    fun `validate on a type that isn't validated`() = assertErrors(
+        """
+        class Plain(val x: Int)
+        @Validated class Bad(
+            @Validate val plain: Plain,
+            @Validate val number: Int,
+            @Validate val plains: List<Plain>,
+        )
+        """,
+        "@Validate can only be used on a property whose type is a @Validated class, or a collection or array of them, but Bad.plain is Plain",
+        "@Validate can only be used on a property whose type is a @Validated class, or a collection or array of them, but Bad.number is kotlin.Int",
+        "@Validate can only be used on a property whose type is a @Validated class, or a collection or array of them, but Bad.plains is kotlin.collections.List<Plain>",
+    )
+
+    @Test
     fun `validated on something other than a class`() = assertErrors(
         """
         @Validated interface Named

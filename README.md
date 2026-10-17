@@ -88,6 +88,37 @@ Team(listOf(4, 9), setOf("kotlin"))  // IllegalArgumentException: Team.ratings[1
 For a `Set` or other unordered collection, the `[index]` is the position in
 iteration order.
 
+### Nested objects: `@Validate`
+
+A property annotated `@Validate` holds `@Validated` objects, or a collection
+or array of them. Their checks run whenever the owner checks the property:
+when the owner is created, and when the property is assigned.
+
+```kotlin
+@Validated class Address(@Regex("[0-9]{5}") val zip: StringBuilder)
+
+@Validated
+class User(@Validate val home: Address, @Validate val others: List<Address> = emptyList())
+
+val address = Address(StringBuilder("12345"))
+address.zip.setLength(1)    // changed in place: no setter, so nothing checks it here
+User(address)               // IllegalArgumentException: User.home is invalid: Address.zip must match the pattern [0-9]{5} but was "1"
+```
+
+A `@Validated` object can't be made invalid through its setters, so this
+catches changes made in place (collections, arrays, `StringBuilder`s) and
+objects created without a constructor. Nesting goes any number of levels deep,
+the nested object's exception is kept as the `cause`, and `null` passes.
+
+The object is checked as what it really is: a property typed `Animal` holding
+a `@Validated class Spider : Animal` runs both classes' checks. The type may
+also be a non-`@Validated` subclass of a `@Validated` class.
+
+`validate()` stays private. To reach it, each `@Validated` class also gets a
+`validate$validated()` bridge. The bridge is public in the bytecode so that
+other classes and modules can call it, but it's hidden from source code: it's
+left out of the Kotlin metadata and marked synthetic for Java.
+
 ### Compile-time errors
 
 Misused annotations fail the build, pointing at the annotation:
@@ -101,8 +132,9 @@ e: Bad.kt:8:133 [validated] @Regex on Bad.brokenPattern has an invalid pattern: 
 
 Also an error: `@Validated` on an interface, annotation class or value class,
 and a `@Validated` class that declares or inherits a `validate()` (it would
-clash with the generated private one). Constraints in a
-class without `@Validated` are a warning (they'd have no effect).
+clash with the generated private one), and `@Validate` on a type that isn't a
+`@Validated` class (or a collection or array of one). Constraints in a class
+without `@Validated` are a warning (they'd have no effect).
 
 ### Using it
 
@@ -132,7 +164,7 @@ tasks.named("compileKotlin") {
 | --- | --- |
 | `plugin` | `ValidatorCompilerPluginRegistrar`, the entry point (found via `META-INF/services`) |
 | `plugin.validated` | names, and the table of constraint annotations |
-| `plugin.validated.ir` | IR: reads the annotations, reports misuse, builds the checks, wires them into constructors and setters (`Elements.kt`: element types of collections and arrays) |
+| `plugin.validated.ir` | IR: reads the annotations, reports misuse, builds the checks, wires them into constructors and setters (`Elements.kt`: element types of collections and arrays; `Bridges.kt`: the hidden entry point used by `@Validate`) |
 | `plugin.util.ir` | reusable IR helpers (`addCallAtStart`, ...) |
 
 ## Supported annotations
@@ -158,6 +190,7 @@ element is checked).
 | `@DoubleDistinct(vararg values)` | `Double` | value is one of `values` |
 | `@StringDistinct(vararg values)` | `String` | value is one of `values` |
 | `@Regex(pattern)` | `CharSequence` (`String`, `StringBuilder`, ...) | the whole value matches `pattern` |
+| `@Validate` | a `@Validated` class (or subclass of one) | the object passes its own checks |
 
 For ranges, leaving `min` or `max` out means no limit on that side.
 
@@ -194,7 +227,8 @@ The tests (`compiler-plugin/src/test`) compile small Kotlin sources in-process
 with the plugin jar loaded via `-Xplugin`, as a real build does
 (`TestCompiler.kt`). They check the compile errors and warnings, and run the
 compiled code to check what is accepted and rejected (`ConstraintsTest`,
-`CollectionsTest`, `LifecycleTest`, `DiagnosticsTest`).
+`CollectionsTest`, `LifecycleTest`, `NestedTest`, `DiagnosticsTest`).
+`NestedTest` also compiles two "modules", one using the other's classes.
 
 ## Requirements
 

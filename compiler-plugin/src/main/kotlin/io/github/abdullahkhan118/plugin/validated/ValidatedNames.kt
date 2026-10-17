@@ -13,6 +13,12 @@ object ValidatedNames {
     /** The private function checking the properties declared in that class; called by its constructors. */
     const val VALIDATE = "validate"
 
+    /** `@Validate`, put on a property holding @Validated objects to have them checked too. */
+    const val VALIDATE_ANNOTATION = "$PACKAGE.Validate"
+
+    /** The hidden public function other classes call to run a @Validated class's checks (see Bridges.kt). */
+    const val BRIDGE = "validate\$validated"
+
     /** Name of the private check generated for one property, e.g. `age` -> `validateAge`. */
     fun propertyValidatorName(propertyName: String) =
         VALIDATE + propertyName.replaceFirstChar { it.uppercaseChar() }

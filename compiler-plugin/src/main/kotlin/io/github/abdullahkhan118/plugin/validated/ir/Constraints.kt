@@ -2,6 +2,7 @@ package io.github.abdullahkhan118.plugin.validated.ir
 
 import io.github.abdullahkhan118.plugin.validated.ConstraintAnnotation
 import io.github.abdullahkhan118.plugin.validated.ConstraintKind
+import io.github.abdullahkhan118.plugin.validated.ValidatedNames
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
 import org.jetbrains.kotlin.cli.common.messages.CompilerMessageLocation
 import org.jetbrains.kotlin.cli.common.messages.CompilerMessageSeverity
@@ -16,6 +17,7 @@ import org.jetbrains.kotlin.ir.expressions.IrVararg
 import org.jetbrains.kotlin.ir.symbols.IrClassSymbol
 import org.jetbrains.kotlin.ir.types.IrType
 import org.jetbrains.kotlin.ir.types.classFqName
+import org.jetbrains.kotlin.ir.types.classOrNull
 import org.jetbrains.kotlin.ir.types.defaultType
 import org.jetbrains.kotlin.ir.types.isSubtypeOfClass
 import org.jetbrains.kotlin.ir.types.makeNotNull
@@ -45,13 +47,12 @@ import java.util.regex.PatternSyntaxException
  * whether the rule applies to the property's value itself or to each of its elements.
  */
 sealed interface Constraint {
-    val annotation: ConstraintAnnotation
     val type: IrType
     val onElements: Boolean
 
     /** `min..max`, inclusive; null means "no limit" on that side. */
     data class Range(
-        override val annotation: ConstraintAnnotation,
+        val annotation: ConstraintAnnotation,
         override val type: IrType,
         override val onElements: Boolean,
         val min: Any?,
@@ -60,7 +61,7 @@ sealed interface Constraint {
 
     /** The value must equal one of [values]. */
     data class Distinct(
-        override val annotation: ConstraintAnnotation,
+        val annotation: ConstraintAnnotation,
         override val type: IrType,
         override val onElements: Boolean,
         val values: List<Any>,
@@ -68,10 +69,20 @@ sealed interface Constraint {
 
     /** The whole value must match [pattern]. */
     data class Pattern(
-        override val annotation: ConstraintAnnotation,
+        val annotation: ConstraintAnnotation,
         override val type: IrType,
         override val onElements: Boolean,
         val pattern: String,
+    ) : Constraint
+
+    /**
+     * `@Validate`: the value is a @Validated object, checked by calling [validated]'s bridge (see Bridges.kt).
+     * [validated] is the property's class, or its nearest @Validated superclass.
+     */
+    data class Nested(
+        override val type: IrType,
+        override val onElements: Boolean,
+        val validated: IrClass,
     ) : Constraint
 }
 
@@ -142,8 +153,10 @@ class ConstraintReader(private val pluginContext: IrPluginContext, private val m
         elements: Elements?,
         annotation: IrConstructorCall,
     ): Constraint? {
-        val constraint = ConstraintAnnotation.byFqName(annotation.type.classFqName?.asString()) ?: return null
         val where = "${irClass.name}.${property.name}"
+        val annotationFqName = annotation.type.classFqName?.asString()
+        if (annotationFqName == ValidatedNames.VALIDATE_ANNOTATION) return readNested(irClass, where, type, elements, annotation)
+        val constraint = ConstraintAnnotation.byFqName(annotationFqName) ?: return null
         val annotationName = "@${constraint.simpleName}"
 
         // The property's type (ignoring `?`), or else its element type, must be a subtype of the annotation's:
@@ -159,7 +172,7 @@ class ConstraintReader(private val pluginContext: IrPluginContext, private val m
             type.makeNotNull().isSubtypeOfClass(accepted) -> false
             elements != null && elements.type.makeNotNull().isSubtypeOfClass(accepted) -> true
             else -> {
-                error(irClass, annotation, "$annotationName can only be used on a ${constraint.appliesTo} property, or a collection or array of them, but $where is ${type.makeNotNull().render()}")
+                error(irClass, annotation, "$annotationName can only be used on a ${constraint.appliesTo} property, or a collection or array of them, but $where is ${type.describe()}")
                 return null
             }
         }
@@ -208,6 +221,21 @@ class ConstraintReader(private val pluginContext: IrPluginContext, private val m
             }
         }
     }
+
+    /**
+     * `@Validate`: the property's class (ignoring `?`), or else its element class, must be @Validated, or extend a
+     * @Validated class (whose bridge then runs the checks, for the whole object).
+     */
+    private fun readNested(irClass: IrClass, where: String, type: IrType, elements: Elements?, annotation: IrConstructorCall): Constraint? {
+        val validatedClassOf = { valueType: IrType -> valueType.makeNotNull().classOrNull?.owner?.nearestValidated() }
+        validatedClassOf(type)?.let { return Constraint.Nested(it.symbol.defaultType, onElements = false, it) }
+        elements?.let { validatedClassOf(it.type) }?.let { return Constraint.Nested(it.symbol.defaultType, onElements = true, it) }
+        error(irClass, annotation, "@Validate can only be used on a property whose type is a @Validated class, or a collection or array of them, but $where is ${type.describe()}")
+        return null
+    }
+
+    /** The type as written in messages, e.g. `kotlin.collections.List<Plain>` (`?` and `<root>.` left out). */
+    private fun IrType.describe(): String = makeNotNull().render().replace("<root>.", "")
 
     /** The annotation's arguments by parameter name, e.g. {"min" -> 18, "max" -> 65}. Left-out ones are null. */
     private fun IrConstructorCall.argumentsByName(): Map<String, IrExpression?> {

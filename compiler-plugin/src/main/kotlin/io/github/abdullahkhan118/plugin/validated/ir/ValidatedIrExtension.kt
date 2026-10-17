@@ -7,12 +7,14 @@ import io.github.abdullahkhan118.plugin.validated.ValueType
 import org.jetbrains.kotlin.backend.common.extensions.IrGenerationExtension
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
 import org.jetbrains.kotlin.backend.common.lower.DeclarationIrBuilder
+import org.jetbrains.kotlin.backend.common.lower.irCatch
 import org.jetbrains.kotlin.backend.common.lower.irNot
 import org.jetbrains.kotlin.backend.common.lower.irThrow
 import org.jetbrains.kotlin.cli.common.messages.CompilerMessageSeverity
 import org.jetbrains.kotlin.cli.common.messages.MessageCollector
 import org.jetbrains.kotlin.descriptors.ClassKind
 import org.jetbrains.kotlin.descriptors.DescriptorVisibilities
+import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.IrStatement
 import org.jetbrains.kotlin.ir.builders.IrBuilderWithScope
 import org.jetbrains.kotlin.ir.builders.IrStatementsBuilder
@@ -38,6 +40,7 @@ import org.jetbrains.kotlin.ir.builders.irSet
 import org.jetbrains.kotlin.ir.builders.irString
 import org.jetbrains.kotlin.ir.builders.irTemporary
 import org.jetbrains.kotlin.ir.builders.irTrue
+import org.jetbrains.kotlin.ir.builders.irTry
 import org.jetbrains.kotlin.ir.builders.irUnit
 import org.jetbrains.kotlin.ir.builders.irWhile
 import org.jetbrains.kotlin.ir.declarations.IrClass
@@ -64,9 +67,11 @@ import org.jetbrains.kotlin.ir.util.constructors
 import org.jetbrains.kotlin.ir.util.createDispatchReceiverParameterWithClassParent
 import org.jetbrains.kotlin.ir.util.functions
 import org.jetbrains.kotlin.ir.util.hasAnnotation
-import org.jetbrains.kotlin.ir.util.isAnnotationClass
-import org.jetbrains.kotlin.ir.util.isInterface
+import org.jetbrains.kotlin.ir.util.parentAsClass
+import org.jetbrains.kotlin.ir.util.properties
 import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
+import org.jetbrains.kotlin.ir.visitors.IrVisitorVoid
+import org.jetbrains.kotlin.ir.visitors.acceptChildrenVoid
 import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.name.FqName
@@ -127,16 +132,38 @@ import org.jetbrains.kotlin.name.Name
  *
  * So an invalid object can't be created (the constructor throws), and an existing one can't be made
  * invalid through a setter (it throws before the field changes).
+ *
+ * A @Validate property holds @Validated objects; its check runs their checks through their bridge
+ * (see Bridges.kt), adding the property to the message:
+ *
+ *     @Validate val address: Address
+ *
+ *     private fun validateAddress(value: Address) {
+ *         try {
+ *             value.`validate$validated`()
+ *         } catch (e: IllegalArgumentException) {
+ *             throw IllegalArgumentException("User.address is invalid: " + e.message, e)
+ *         }
+ *     }
  */
 class ValidatedIrExtension(private val messages: MessageCollector) : IrGenerationExtension {
     override fun generate(moduleFragment: IrModuleFragment, pluginContext: IrPluginContext) {
         val symbols = ValidationSymbols.find(pluginContext, messages) ?: return
         val reader = ConstraintReader(pluginContext, messages)
+        val bridges = Bridges(pluginContext)
+        // First declare every bridge, so a class can call the bridge of a class transformed after it.
+        moduleFragment.acceptChildrenVoid(object : IrVisitorVoid() {
+            override fun visitElement(element: IrElement) = element.acceptChildrenVoid(this)
+            override fun visitClass(declaration: IrClass) {
+                super.visitClass(declaration)
+                if (declaration.isValidated()) bridges.declare(declaration)
+            }
+        })
         moduleFragment.transformChildrenVoid(object : IrElementTransformerVoid() {
             override fun visitClass(declaration: IrClass): IrStatement {
                 // Nested classes first, then this one (adding functions to it while visiting is fine then).
                 super.visitClass(declaration)
-                ValidatedClassTransformer(pluginContext, symbols, reader, declaration).transform()
+                ValidatedClassTransformer(pluginContext, symbols, reader, bridges, declaration).transform()
                 return declaration
             }
         })
@@ -150,11 +177,15 @@ class ValidatedIrExtension(private val messages: MessageCollector) : IrGeneratio
  * @property regexMatches `Regex.matches(input: CharSequence): Boolean` (whole-input match).
  * @property exceptionConstructor `IllegalArgumentException(message: String)`. Referenced as
  *   `java.lang.IllegalArgumentException`, because `kotlin.IllegalArgumentException` is only a typealias.
+ * @property exceptionWithCauseConstructor `IllegalArgumentException(message: String, cause: Throwable)`.
+ * @property throwableMessage the getter of `Throwable.message`.
  */
 class ValidationSymbols(
     val regexConstructor: IrConstructorSymbol,
     val regexMatches: IrSimpleFunctionSymbol,
     val exceptionConstructor: IrConstructorSymbol,
+    val exceptionWithCauseConstructor: IrConstructorSymbol,
+    val throwableMessage: IrSimpleFunctionSymbol,
 ) {
     companion object {
         fun find(pluginContext: IrPluginContext, messages: MessageCollector): ValidationSymbols? {
@@ -165,11 +196,19 @@ class ValidationSymbols(
                 it.owner.name.asString() == "matches" && it.owner.parameters.size == 2
             }
             val exceptionConstructor = exception?.constructors?.firstOrNull { it.owner.hasSingleStringParameter() }
-            if (regexConstructor == null || regexMatches == null || exceptionConstructor == null) {
-                messages.report(CompilerMessageSeverity.ERROR, "[validated] kotlin.text.Regex or IllegalArgumentException not found")
+            val exceptionWithCauseConstructor = exception?.constructors?.firstOrNull {
+                val parameters = it.owner.parameters
+                parameters.size == 2 && parameters[1].type.makeNotNull().classFqName?.asString() == "kotlin.Throwable"
+            }
+            val throwableMessage = pluginContext.irBuiltIns.throwableClass.owner.properties
+                .firstOrNull { it.name.asString() == "message" }?.getter?.symbol
+            if (regexConstructor == null || regexMatches == null || exceptionConstructor == null ||
+                exceptionWithCauseConstructor == null || throwableMessage == null
+            ) {
+                messages.report(CompilerMessageSeverity.ERROR, "[validated] kotlin.text.Regex, IllegalArgumentException or Throwable.message not found")
                 return null
             }
-            return ValidationSymbols(regexConstructor, regexMatches, exceptionConstructor)
+            return ValidationSymbols(regexConstructor, regexMatches, exceptionConstructor, exceptionWithCauseConstructor, throwableMessage)
         }
 
         private fun org.jetbrains.kotlin.ir.declarations.IrFunction.hasSingleStringParameter() =
@@ -182,11 +221,29 @@ private class ValidatedClassTransformer(
     private val pluginContext: IrPluginContext,
     private val symbols: ValidationSymbols,
     private val reader: ConstraintReader,
+    private val bridges: Bridges,
     private val irClass: IrClass,
 ) {
     private val irBuiltIns = pluginContext.irBuiltIns
 
     fun transform() {
+        val validate = transformValidated() ?: return
+        writeBridge(validate)
+    }
+
+    /**
+     * Adds the checks if the class is @Validated, and returns its validate(); null if it isn't @Validated or is
+     * misused (then its bridge, if declared, gets an empty body: the backend can't handle bodiless functions).
+     */
+    private fun transformValidated(): IrSimpleFunction? {
+        val validate = addChecks()
+        if (validate == null && irClass.isValidated()) {
+            bridges.of(irClass).body = DeclarationIrBuilder(pluginContext, bridges.of(irClass).symbol).irBlockBody { }
+        }
+        return validate
+    }
+
+    private fun addChecks(): IrSimpleFunction? {
         val isValidated = irClass.hasAnnotation(FqName(ValidatedNames.ANNOTATION))
         val constraints = reader.read(irClass)
 
@@ -195,12 +252,12 @@ private class ValidatedClassTransformer(
             constraints.properties.forEach {
                 reader.warning(irClass, it.property, "${irClass.name}.${it.property.name} has constraints, but they have no effect: ${irClass.name} isn't annotated with @Validated")
             }
-            return
+            return null
         }
 
-        if (irClass.isInterface || irClass.isAnnotationClass || irClass.isValue) {
+        if (!irClass.canBeValidated()) {
             reader.error(irClass, irClass, "@Validated can only be used on classes and objects, not on ${if (irClass.isValue) "value classes" else "interfaces or annotation classes"}")
-            return
+            return null
         }
 
         // The generated private validate() would clash with a validate() the class declares, or inherits from a
@@ -209,16 +266,36 @@ private class ValidatedClassTransformer(
         if (existing != null) {
             val what = if (existing.isFakeOverride) "inherit" else "declare"
             reader.error(irClass, if (existing.isFakeOverride) irClass else existing, "@Validated generates a private 'validate()', so ${irClass.name} can't $what one. Rename it or remove the @Validated annotation.")
-            return
+            return null
         }
 
         // On misuse (already reported), generate nothing.
-        if (constraints.hasErrors) return
+        if (constraints.hasErrors) return null
 
         val validators = constraints.properties.associateWith { buildPropertyValidator(it) }
         val validate = buildValidate(validators)
         if (irClass.kind == ClassKind.OBJECT) validateInLastInitBlock(validate) else validateAtEndOfConstructors(validate)
         validateAtStartOfSetters(validators)
+        return validate
+    }
+
+    /**
+     * The bridge (declared in Bridges): `super.validate$validated()` if a superclass is @Validated, then
+     * `validate()`. So calling it on an object checks all of the object's @Validated classes.
+     */
+    private fun writeBridge(validate: IrSimpleFunction) {
+        val bridge = bridges.of(irClass)
+        val superValidated = irClass.validatedSuperclass()
+        val superBridge = superValidated?.let { bridges.of(it) }
+        if (superBridge != null) bridge.overriddenSymbols = listOf(superBridge.symbol)
+        bridge.body = DeclarationIrBuilder(pluginContext, bridge.symbol).irBlockBody {
+            val self = bridge.dispatchReceiverParameter!!
+            if (superBridge != null) {
+                // A non-virtual call to the superclass's bridge.
+                +irCall(superBridge, superQualifierSymbol = superValidated.symbol).apply { arguments[0] = irGet(self) }
+            }
+            +irCall(validate.symbol).apply { arguments[0] = irGet(self) }
+        }
     }
 
     /** `fun validate()`: that name, and no parameters besides `this`. */
@@ -311,7 +388,28 @@ private class ValidatedClassTransformer(
             is Constraint.Range -> addRangeCheck(constraint, where, read)
             is Constraint.Distinct -> addDistinctCheck(constraint, where, read)
             is Constraint.Pattern -> addPatternCheck(constraint, where, read)
+            is Constraint.Nested -> addNestedCheck(constraint, where, read)
         }
+    }
+
+    /**
+     * `try { value.validate$validated() } catch (e: IllegalArgumentException) { throw IllegalArgumentException(
+     * "User.address is invalid: " + e.message, e) }`: runs the nested object's checks, naming the property.
+     */
+    private fun IrStatementsBuilder<*>.addNestedCheck(constraint: Constraint.Nested, where: () -> List<IrExpression>, read: () -> IrExpression) {
+        val check = irCall(bridges.of(constraint.validated).symbol).apply { arguments[0] = read() }
+        val exceptionType = symbols.exceptionConstructor.owner.parentAsClass.symbol.typeWith()
+        val caught = scope.createTemporaryVariableDeclaration(exceptionType, "e", origin = IrDeclarationOrigin.CATCH_PARAMETER, startOffset = startOffset, endOffset = endOffset)
+        val message = irConcat().apply {
+            arguments.addAll(where())
+            arguments.add(irString(" is invalid: "))
+            arguments.add(irCall(symbols.throwableMessage).apply { arguments[0] = irGet(caught) })
+        }
+        val rethrow = irThrow(irCallConstructor(symbols.exceptionWithCauseConstructor, emptyList()).apply {
+            arguments[0] = message
+            arguments[1] = irGet(caught)
+        })
+        +irTry(irBuiltIns.unitType, check, listOf(irCatch(caught, rethrow)), null)
     }
 
     /** `if (value < min || value > max) throw ...`; a side without a limit isn't checked. */

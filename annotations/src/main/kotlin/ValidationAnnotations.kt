@@ -20,6 +20,15 @@ package io.github.abdullahkhan118.annotations
 @Retention(AnnotationRetention.BINARY)
 annotation class Validated
 
+/**
+ * The property holds a @Validated object (or a collection or array of them), and the owner checks it too: when the
+ * owner is created, and when the property is assigned. A failure is reported as
+ * `Owner.property is invalid: <the nested object's message>`.
+ */
+@Target(AnnotationTarget.PROPERTY)
+@Retention(AnnotationRetention.BINARY)
+annotation class Validate
+
 // Ranges: the value must be within [min, max], both inclusive. Leaving one out means "no limit" on that side.
 // (The compiler plugin repeats these defaults; keep them in sync with ConstraintAnnotation in compiler-plugin.)
 
